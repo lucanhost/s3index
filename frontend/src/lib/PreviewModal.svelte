@@ -15,11 +15,39 @@
   let copied = false;
   let copiedDownload = false;
 
+  function copyToClipboard(text: string) {
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).catch(err => {
+        console.error("Clipboard API failed, using fallback:", err);
+        fallbackCopyToClipboard(text);
+      });
+    } else {
+      fallbackCopyToClipboard(text);
+    }
+  }
+
+  // Fallback for insecure contexts (HTTP) or unsupported browsers
+  function fallbackCopyToClipboard(text: string) {
+    const textArea = document.createElement("textarea");
+    textArea.value = text;
+    textArea.style.top = "0";
+    textArea.style.left = "0";
+    textArea.style.position = "fixed";
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    try {
+      document.execCommand("copy");
+    } catch (err) {
+      console.error("Fallback copy failed:", err);
+    }
+    document.body.removeChild(textArea);
+  }
+
   function copyShareLink() {
     if (!file) return;
-    // /path/to/file?preview
-    const shareUrl = window.location.origin + '/' + file.path + '?preview';
-    navigator.clipboard.writeText(shareUrl);
+    const shareUrl = window.location.origin + '/' + file.path;
+    copyToClipboard(shareUrl);
     copied = true;
     setTimeout(() => { copied = false; }, 2000);
   }
@@ -27,7 +55,7 @@
   function copyDownloadLink() {
     if (!file) return;
     const downloadUrl = window.location.origin + getObjectUrl(file.path);
-    navigator.clipboard.writeText(downloadUrl);
+    copyToClipboard(downloadUrl);
     copiedDownload = true;
     setTimeout(() => { copiedDownload = false; }, 2000);
   }

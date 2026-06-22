@@ -26,20 +26,23 @@
 
 
   // ── URL helpers ─────────────────────────────────────────────────────────────
-  // Preview URL:   /path/to/file?preview  (bare flag, no value)
-  // Directory URL: /some/prefix/          (no query)
+  // Preview URL:   /path/to/file          (path without trailing slash)
+  // Directory URL: /some/prefix/          (path with trailing slash, or empty)
 
   function parseCurrentUrl(): { prefix: string; previewKey: string | undefined } {
     const url = new URL(window.location.href);
-    const isPreview = url.searchParams.has('preview');
-    if (isPreview) {
-      const fileKey = url.pathname.replace(/^\//, '');
-      const parts = fileKey.split('/');
-      parts.pop();
-      const dirPrefix = parts.length > 0 ? parts.join('/') + '/' : '';
-      return { prefix: dirPrefix, previewKey: fileKey };
+    const path = url.pathname.replace(/^\//, ''); // e.g. "path/to/file.jpg" or "path/to/dir/"
+    if (path === "") {
+      return { prefix: "", previewKey: undefined };
     }
-    return { prefix: url.pathname.replace(/^\//, ''), previewKey: undefined };
+    if (path.endsWith('/')) {
+      return { prefix: path, previewKey: undefined };
+    }
+    // It's a file preview! The parent prefix is the directory containing the file.
+    const parts = path.split('/');
+    parts.pop(); // remove filename to get the directory prefix
+    const dirPrefix = parts.length > 0 ? parts.join('/') + '/' : '';
+    return { prefix: dirPrefix, previewKey: path };
   }
 
   async function loadDirectory(newPrefix: string, openPreviewKey: string | undefined = undefined) {
@@ -83,7 +86,7 @@
 
   function openPreview(file: FileEntry) {
     previewFile = file;
-    window.history.pushState({}, '', '/' + file.path + '?preview');
+    window.history.pushState({}, '', '/' + file.path);
   }
 
   function closePreview() {
