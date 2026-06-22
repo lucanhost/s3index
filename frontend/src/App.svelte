@@ -301,6 +301,6 @@
 
   <!-- Footer -->
   <footer class="border-t border-white/5 py-4 text-center text-xs text-slate-600">
-    S3 Index &mdash; Powered by Hono
+    S3 Index &mdash; Powered by Go
   </footer>
 </div>
