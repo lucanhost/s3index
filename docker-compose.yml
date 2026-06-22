@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  s3index:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: s3index
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    restart: unless-stopped
