@@ -81,6 +81,22 @@ Run the standalone executable:
 PORT=8080 ./s3index
 ```
 
+### Docker (Containerization)
+
+Build and start the application inside a lightweight Alpine container:
+
+```bash
+docker compose up --build -d
+```
+
+The server will be available at `http://localhost:8080` mapping variables automatically from your `.env` file.
+
+To stop the container:
+
+```bash
+docker compose down
+```
+
 ### Clean Up
 
 Remove compiled binaries and temporary build assets:
@@ -88,3 +104,4 @@ Remove compiled binaries and temporary build assets:
 ```bash
 make clean
 ```
+
