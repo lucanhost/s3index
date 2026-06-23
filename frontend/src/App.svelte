@@ -201,38 +201,29 @@
           Retry
         </button>
       </div>
-
-    <!-- Loading state -->
-    {:else if loading}
-      <div class="glass rounded-xl border border-white/8 overflow-hidden">
-        <!-- Skeleton header -->
-        <div class="px-4 py-3 border-b border-white/5 flex items-center gap-4">
-          {#each [120, 80, 100] as w}
-            <div class="h-3 rounded bg-white/5 animate-pulse" style="width:{w}px"></div>
-          {/each}
-        </div>
-        {#each [1,2,3,4,5,6,7,8] as _}
-          <div class="flex items-center gap-3 px-4 py-3 border-b border-white/[0.03]">
-            <div class="w-5 h-5 rounded bg-white/5 animate-pulse flex-shrink-0"></div>
-            <div class="h-3 rounded bg-white/5 animate-pulse flex-1" style="max-width:{60 + Math.random() * 200}px"></div>
-            <div class="h-3 rounded bg-white/5 animate-pulse w-16 hidden sm:block"></div>
-            <div class="h-3 rounded bg-white/5 animate-pulse w-14"></div>
-          </div>
-        {/each}
-      </div>
-
-    <!-- Directory listing -->
     {:else}
       <!-- Stats bar -->
-      <div class="flex items-center gap-3 mb-4 flex-wrap text-xs text-slate-500">
-        <span>{folderCount} folder{folderCount !== 1 ? 's' : ''}</span>
-        <span class="text-slate-700">•</span>
-        <span>{fileCount} file{fileCount !== 1 ? 's' : ''}</span>
-        {#if fileCount > 0}
+      {#if loading}
+        <!-- Stats skeleton -->
+        <div class="flex items-center gap-3 mb-4 flex-wrap text-xs text-slate-500">
+          <div class="h-3 w-16 rounded bg-white/5 animate-pulse"></div>
           <span class="text-slate-700">•</span>
-          <span>{formatSize(totalSize)} total</span>
-        {/if}
-      </div>
+          <div class="h-3 w-14 rounded bg-white/5 animate-pulse"></div>
+          <span class="text-slate-700">•</span>
+          <div class="h-3 w-20 rounded bg-white/5 animate-pulse"></div>
+        </div>
+      {:else}
+        <!-- Stats bar -->
+        <div class="flex items-center gap-3 mb-4 flex-wrap text-xs text-slate-500">
+          <span>{folderCount} folder{folderCount !== 1 ? 's' : ''}</span>
+          <span class="text-slate-700">•</span>
+          <span>{fileCount} file{fileCount !== 1 ? 's' : ''}</span>
+          {#if fileCount > 0}
+            <span class="text-slate-700">•</span>
+            <span>{formatSize(totalSize)} total</span>
+          {/if}
+        </div>
+      {/if}
 
       <!-- File browser card -->
       <div class="glass rounded-xl border border-white/8 overflow-hidden">
@@ -265,15 +256,29 @@
           <div class="w-6 ml-2 flex-shrink-0"></div>
         </div>
 
-        <!-- List view -->
-        <FileList
-          {files}
-          {folders}
-          onNavigate={navigate}
-          onPreview={openPreview}
-          {sortKey}
-          {sortDir}
-        />
+        {#if loading}
+          <!-- FileList skeleton (lazyload animation) -->
+          <div class="divide-y divide-white/5">
+            {#each [1,2,3,4,5,6,7,8] as _}
+              <div class="flex items-center gap-3 px-4 py-3 border-b border-white/[0.03]">
+                <div class="w-5 h-5 rounded bg-white/5 animate-pulse flex-shrink-0"></div>
+                <div class="h-3 rounded bg-white/5 animate-pulse flex-1" style="max-width:{60 + Math.random() * 200}px"></div>
+                <div class="h-3 rounded bg-white/5 animate-pulse w-16 hidden sm:block"></div>
+                <div class="h-3 rounded bg-white/5 animate-pulse w-14"></div>
+              </div>
+            {/each}
+          </div>
+        {:else}
+          <!-- List view -->
+          <FileList
+            {files}
+            {folders}
+            onNavigate={navigate}
+            onPreview={openPreview}
+            {sortKey}
+            {sortDir}
+          />
+        {/if}
       </div>
 
       <!-- README.md section -->
