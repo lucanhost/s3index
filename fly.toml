@@ -1,16 +1,21 @@
+# fly.toml app configuration file generated for s3index on 2026-06-23T11:14:47Z
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
 app = "s3index"
 primary_region = "sin"
 
 [http_service]
 auto_start_machines = true
-auto_stop_machines = true
+auto_stop_machines = 'off'
 force_https = true
-internal_port = 8_080
+internal_port = 8080
 min_machines_running = 0
-processes = [ "app" ]
+processes = ['app']
 
 [[vm]]
-cpu_kind = "shared"
-cpus = 1
-memory = "1gb"
-memory_mb = 256
+  cpu_kind = 'shared'
+  cpus = 1
+  memory = '1gb'
+  memory_mb = 256
