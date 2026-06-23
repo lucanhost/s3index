@@ -156,8 +156,8 @@
         class="flex items-center gap-2 flex-shrink-0 cursor-pointer hover:opacity-90 transition-opacity text-left"
         onclick={() => navigate('')}
       >
-        <div class="w-7 h-7 rounded-lg overflow-hidden border border-purple-500/35 flex items-center justify-center shadow-lg shadow-purple-950/50 bg-black/40">
-          <img src="/logo.jpg" alt="Logo" class="w-full h-full object-cover" />
+        <div class="w-5 h-5 rounded overflow-hidden border border-purple-500/35 flex items-center justify-center shadow-lg shadow-purple-950/50 bg-black/40">
+          <img src="/logo.png" alt="Logo" class="w-full h-full object-cover" />
         </div>
         <span class="font-semibold text-white text-sm hidden sm:block">S3 Index</span>
       </button>

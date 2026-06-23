@@ -1,4 +1,4 @@
-package main
+package config
 
 import (
 	"log"
@@ -16,23 +16,23 @@ type Config struct {
 	S3SecretAccessKey string        `env:"S3_SECRET_ACCESS_KEY"`
 	S3ForcePathStyle  bool          `env:"S3_FORCE_PATH_STYLE" envDefault:"false"`
 	Port              string        `env:"PORT" envDefault:"8080"`
-	ApiCacheTTL       time.Duration `env:"API_CACHE_TTL" envDefault:"1m"`
-	ApiCacheSize      int           `env:"API_CACHE_SIZE" envDefault:"1000"`
-	ApiCacheMaxMemory string        `env:"API_CACHE_MAX_MEMORY" envDefault:"50MB"`
+	SyncInterval      time.Duration `env:"SYNC_INTERVAL" envDefault:"5m"`
 }
 
-var globalConfig Config
-
-func loadConfig() {
+func LoadConfig() *Config {
 	// Load .env file (ignore error if not found, as configuration can come from system env vars)
 	_ = godotenv.Load()
 
+	var cfg Config
+
 	// Parse environment variables directly into Config struct
-	if err := env.Parse(&globalConfig); err != nil {
+	if err := env.Parse(&cfg); err != nil {
 		log.Printf("Warning: Failed to parse configuration: %v", err)
 	}
 
-	if globalConfig.S3Bucket == "" {
+	if cfg.S3Bucket == "" {
 		log.Println("WARNING: S3_BUCKET environment variable is not set")
 	}
+
+	return &cfg
 }

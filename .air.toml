@@ -4,7 +4,7 @@ root = "."
 tmp_dir = "tmp"
 
 [build]
-cmd = "go build -o ./tmp/main ."
+cmd = "go build -o ./tmp/main ./cmd/s3index"
 bin = "./tmp/main"
 include_ext = ["go", "tpl", "html", "tmpl"]
 exclude_dir = ["assets", "tmp", "vendor", "node_modules", "dist"]

@@ -1,107 +1,52 @@
 # S3 Index
 
-A modern, high-performance, standalone S3-compatible storage file browser. The project compiles into a single binary containing both the Go backend API and the embedded Svelte 5 + Tailwind CSS v4 frontend.
+A modern, high-performance S3-compatible storage file browser. It features a standalone Golang backend with an ultra-fast `kelindar/column` metadata store, serving a beautifully responsive Svelte 5 + Tailwind CSS v4 frontend embedded directly into a single binary.
 
-## Features
+## Architecture
 
-- **Isolated & Embeddable Design**: Serve the complete frontend directly from a single compiled binary without external dependencies.
-- **High-Performance Caching**: Native, thread-safe, and expirable LRU cache (backed by `TwiN/gocache/v2`) protecting S3 endpoints by caching results for List, Info, and Search queries.
-- **Memory-Safe Search**: Recursively queries buckets with safety cancel hooks to prevent goroutine leaks.
-- **Fast, Minimal UI**: A beautifully optimized single-page application (SPA) with folders-first list view, immediate search (⌘K), and instant file previews.
-- **Direct Downloads**: Generates S3 presigned URLs automatically to redirect clients for high-speed direct downloads.
-- **Hot-Reloading Environment**: Seamless developer orchestration using Go Air and Vite.
+*   **Backend:** Go (1.25) modular API utilizing standard package layout (`cmd/s3index`, `internal/api`, `internal/store`, `internal/s3client`, `internal/config`).
+*   **Store:** `kelindar/column` providing zero-allocation, SIMD-accelerated, thread-safe memory columnar indexing of your S3 bucket metadata.
+*   **Frontend:** Svelte 5 + Vite + Tailwind CSS v4 for a seamless Single Page Application (SPA) experience.
+*   **Deployment:** The frontend compiles into `frontend/dist/` which is then natively embedded via `//go:embed` into a single lightweight Go executable.
+*   **Caching Strategy:** Static assets (JS/CSS) are aggressively cached by the browser (`Cache-Control: public, max-age=31536000, immutable`), while the HTML entrypoint is never cached to ensure instant updates. API routes fetch in-memory from the fast column store.
 
-## Tech Stack
+## Go API Routes
 
-- **Backend**: Go (`net/http`), MinIO S3 SDK.
-- **Frontend**: Svelte 5, TypeScript, Tailwind CSS v4, Vite.
-- **Orchestration**: Makefile, Go Air (`air`).
+| Route | Method | Description |
+|---|---|---|
+| `/api/health` | `GET` | Health check |
+| `/api/list?prefix=<prefix>` | `GET` | List folder contents (Queries columnar memory store) |
+| `/api/info?key=<key>` | `GET` | Get file metadata (Queries columnar memory store) |
+| `/api/search?q=<query>` | `GET` | Search all files and folders in bucket |
+| `/api/object/{key...}` | `GET` | Generates S3 presigned URL and redirects (302) client |
+| `/*` | `GET` | Serves embedded frontend static files (SPA fallback) |
 
----
+## Development & Operations
 
-## Configuration
+1. **Build frontend assets**:
+   ```bash
+   make build-frontend
+   ```
 
-Duplicate `.env.example` to create a `.env` file at the root:
+2. **Build standalone binary**:
+   ```bash
+   make build
+   ```
+   This compiles the Svelte assets to `frontend/dist/` and then builds the `s3index` Go binary with embedded assets.
 
-```ini
-S3_BUCKET=your-bucket-name
-S3_REGION=us-east-1
-S3_ENDPOINT=https://s3.yourprovider.com
-S3_ACCESS_KEY_ID=your-access-key-id
-S3_SECRET_ACCESS_KEY=your-secret-access-key
-S3_FORCE_PATH_STYLE=false
+3. **Development Mode (Hot-Reloading)**:
+   ```bash
+   make dev
+   ```
+   Launches the Go Air hot-rebuild backend (on `http://localhost:8080`) and Svelte Vite dev server (on `http://localhost:5173`) concurrently.
 
-# Cache Configurations (Optional)
-API_CACHE_TTL=1m
-API_CACHE_SIZE=1000
-API_CACHE_MAX_MEMORY=50MB
-```
+4. **Clean up build artifacts**:
+   ```bash
+   make clean
+   ```
 
----
-
-## Getting Started
-
-### Prerequisites
-
-- Go 1.22+
-- Node.js 18+ & npm
-- [Air](https://github.com/air-verse/air) (for Go live reloading)
-
-### Installation
-
-Install frontend dependencies:
-
-```bash
-npm install --prefix frontend
-```
-
-### Local Development (Hot Reloading)
-
-Launch the backend Air server and Svelte dev server concurrently:
-
-```bash
-make dev
-```
-
-The frontend will run at `http://localhost:5173` (with HMR) proxying S3 calls to the Go backend on `http://localhost:8080`.
-
-### Production Build
-
-Build the production-ready frontend bundle and compile the standalone optimized Go executable:
-
-```bash
-make build
-```
-
-This compiles Vite assets to `frontend/dist/` and compiles the Go app with embedded assets using `-ldflags="-s -w"` to strip debug symbols (shrinking the binary size to ~7.9MB).
-
-Run the standalone executable:
-
-```bash
-PORT=8080 ./s3index
-```
-
-### Docker (Containerization)
-
-Build and start the application inside a lightweight Alpine container:
-
-```bash
-docker compose up --build -d
-```
-
-The server will be available at `http://localhost:8080` mapping variables automatically from your `.env` file.
-
-To stop the container:
-
-```bash
-docker compose down
-```
-
-### Clean Up
-
-Remove compiled binaries and temporary build assets:
-
-```bash
-make clean
-```
-
+5. **Docker Container**:
+   Build and run the application in a background container:
+   ```bash
+   docker compose up --build -d
+   ```
