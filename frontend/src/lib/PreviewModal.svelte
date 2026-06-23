@@ -117,31 +117,32 @@
       role="presentation"
     >
       <!-- Header -->
-      <div class="flex items-center gap-3 px-5 py-3.5 border-b border-white/8 flex-shrink-0">
-        <div class="text-purple-400">
+      <div class="flex items-center gap-2 sm:gap-3 px-4 sm:px-5 py-3 border-b border-white/8 flex-shrink-0">
+        <div class="text-purple-400 flex-shrink-0">
           <FileIcon category={category} size={20} />
         </div>
         <div class="flex-1 min-w-0">
           <h2 class="text-white font-semibold text-sm truncate">{file.name}</h2>
-          <p class="text-xs text-slate-500 truncate font-mono">{file.path}</p>
+          <p class="text-[10px] sm:text-xs text-slate-500 truncate font-mono mt-0.5">{file.path}</p>
         </div>
-        <div class="flex items-center gap-2 flex-shrink-0">
+        <div class="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
           <!-- Download button -->
           <a
             href={objectUrl}
             download={file.name}
-            class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-600/20 text-purple-300 hover:bg-purple-600/40 border border-purple-500/20 hover:border-purple-400/40 transition-all text-xs font-medium"
+            class="flex items-center gap-1.5 p-2 sm:px-3 sm:py-1.5 rounded-lg bg-purple-600/20 text-purple-300 hover:bg-purple-600/40 border border-purple-500/20 hover:border-purple-400/40 transition-all text-xs font-medium"
+            title="Download file"
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
               <polyline points="7 10 12 15 17 10" />
               <line x1="12" y1="15" x2="12" y2="3" />
             </svg>
-            Download
+            <span class="hidden sm:inline">Download</span>
           </a>
           <!-- Copy download URL button -->
           <button
-            class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 text-slate-300 hover:bg-white/10 border border-white/8 transition-all text-xs font-medium"
+            class="flex items-center gap-1.5 p-2 sm:px-3 sm:py-1.5 rounded-lg bg-white/5 text-slate-300 hover:bg-white/10 border border-white/8 transition-all text-xs font-medium"
             onclick={copyDownloadLink}
             title="Copy direct download URL of this file"
           >
@@ -149,18 +150,18 @@
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#86efac" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="20 6 9 17 4 12" />
               </svg>
-              <span class="text-green-300">Copied URL!</span>
+              <span class="text-green-300 hidden sm:inline">Copied URL!</span>
             {:else}
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                 <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
                 <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
               </svg>
-              Copy URL
+              <span class="hidden sm:inline">Copy URL</span>
             {/if}
           </button>
           <!-- Share link -->
           <button
-            class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 text-slate-300 hover:bg-white/10 border border-white/8 transition-all text-xs font-medium"
+            class="flex items-center gap-1.5 p-2 sm:px-3 sm:py-1.5 rounded-lg bg-white/5 text-slate-300 hover:bg-white/10 border border-white/8 transition-all text-xs font-medium"
             onclick={copyShareLink}
             title="Copy shareable link"
           >
@@ -168,18 +169,18 @@
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#86efac" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="20 6 9 17 4 12" />
               </svg>
-              <span class="text-green-300">Copied!</span>
+              <span class="text-green-300 hidden sm:inline">Copied!</span>
             {:else}
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
                 <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
               </svg>
-              Share
+              <span class="hidden sm:inline">Share</span>
             {/if}
           </button>
           <!-- Close -->
           <button
-            class="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-all"
+            class="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-all flex-shrink-0"
             onclick={onClose}
             aria-label="Close preview"
           >
