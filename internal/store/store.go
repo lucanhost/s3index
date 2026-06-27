@@ -13,7 +13,8 @@ import (
 
 	"github.com/lucanhost/s3index/internal/db"
 	"github.com/lucanhost/s3index/internal/s3client"
-	_ "modernc.org/sqlite"
+	"github.com/ncruces/go-sqlite3/driver"
+	"github.com/ncruces/go-sqlite3/ext/fts5"
 )
 
 
@@ -70,7 +71,7 @@ func (s *Store) GetQueries() *db.Queries {
 }
 
 func createEmptyDB() (*DBState, error) {
-	conn, err := sql.Open("sqlite", "file::memory:?mode=memory")
+	conn, err := driver.Open("file::memory:?mode=memory", fts5.Register)
 	if err != nil {
 		return nil, err
 	}
