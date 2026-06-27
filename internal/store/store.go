@@ -76,6 +76,9 @@ func createEmptyDB() (*DBState, error) {
 	}
 	conn.SetMaxOpenConns(1)
 
+	// Optimize page size to reduce libc malloc overhead for in-memory DBs
+	conn.Exec("PRAGMA page_size = 8192;")
+
 	if _, err := conn.Exec(db.SchemaSQL); err != nil {
 		return nil, err
 	}
@@ -144,7 +147,7 @@ func (s *Store) fetchAndCreateDB(ctx context.Context) (*DBState, error) {
 			return nil, err
 		}
 
-		// Create parent directories efficiently without splitting
+		// Zero-allocation folder path traversal
 		current := 0
 		for {
 			idx := strings.IndexByte(obj.Key[current:], '/')
@@ -186,6 +189,9 @@ func (s *Store) fetchAndCreateDB(ctx context.Context) (*DBState, error) {
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
+
+	// Actively compact SQLite internal heap and release unused pages back to the libc allocator
+	newState.DB.Exec("PRAGMA shrink_memory")
 
 	return newState, nil
 }
