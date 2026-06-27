@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"database/sql"
-	_ "embed"
 	"log"
 	"mime"
 	"path/filepath"
@@ -17,8 +16,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-//go:embed schema.sql
-var schemaSQL string
+
 
 type DBState struct {
 	DB      *sql.DB
@@ -78,7 +76,7 @@ func createEmptyDB() (*DBState, error) {
 	}
 	conn.SetMaxOpenConns(1)
 
-	if _, err := conn.Exec(schemaSQL); err != nil {
+	if _, err := conn.Exec(db.SchemaSQL); err != nil {
 		return nil, err
 	}
 
