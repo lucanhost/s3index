@@ -58,8 +58,10 @@ func NewStore(ctx context.Context, client *s3client.Client, syncInterval time.Du
 
 	s.state.Store(newState)
 
-	// Start background sync worker
-	go s.startSyncWorker(ctx, syncInterval)
+	// Start background sync worker if interval is positive
+	if syncInterval > 0 {
+		go s.startSyncWorker(ctx, syncInterval)
+	}
 
 	return s
 }
