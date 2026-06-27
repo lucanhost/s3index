@@ -22,39 +22,29 @@ func (s *Server) handleList(c *fiber.Ctx) error {
 	}
 
 	prefix := c.Query("prefix")
-	db := s.store.GetDB()
-	if db == nil {
+	q := s.store.GetQueries()
+	if q == nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Store not initialized"})
 	}
 
 	files := make([]FileEntry, 0)
 	folders := make([]FolderEntry, 0)
 
-	rows, err := db.Query("SELECT key, name, is_dir, size, last_modified FROM objects WHERE parent = ?", prefix)
+	objects, err := q.ListObjectsByParent(c.Context(), prefix)
 	if err != nil {
-		log.Printf("Query error: %v", err)
+		log.Printf("ListObjectsByParent error: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Database error"})
 	}
-	defer rows.Close()
 
-	for rows.Next() {
-		var key, name, lastMod string
-		var isDir bool
-		var size int64
-
-		if err := rows.Scan(&key, &name, &isDir, &size, &lastMod); err != nil {
-			log.Printf("Row scan error: %v", err)
-			continue
-		}
-
-		if isDir {
-			folders = append(folders, FolderEntry{Name: name, Path: key})
+	for _, obj := range objects {
+		if obj.IsDir {
+			folders = append(folders, FolderEntry{Name: obj.Name, Path: obj.Key})
 		} else {
 			files = append(files, FileEntry{
-				Name:         name,
-				Path:         key,
-				Size:         size,
-				LastModified: lastMod,
+				Name:         obj.Name,
+				Path:         obj.Key,
+				Size:         obj.Size,
+				LastModified: obj.LastModified,
 			})
 		}
 	}
@@ -77,15 +67,21 @@ func (s *Server) handleInfo(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Missing key parameter"})
 	}
 
-	db := s.store.GetDB()
-	if db == nil {
+	q := s.store.GetQueries()
+	if q == nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Store not initialized"})
 	}
 
-	var info FileInfo
-	err := db.QueryRow("SELECT size, content_type, last_modified, etag FROM objects WHERE key = ?", key).Scan(&info.Size, &info.ContentType, &info.LastModified, &info.ETag)
+	obj, err := q.GetObject(c.Context(), key)
 	if err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Not found"})
+	}
+
+	info := FileInfo{
+		Size:         obj.Size,
+		ContentType:  obj.ContentType,
+		LastModified: obj.LastModified,
+		ETag:         obj.Etag,
 	}
 
 	return c.JSON(info)
@@ -97,8 +93,8 @@ func (s *Server) handleSearch(c *fiber.Ctx) error {
 	}
 
 	query := c.Query("q")
-	db := s.store.GetDB()
-	if db == nil {
+	q := s.store.GetQueries()
+	if q == nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Store not initialized"})
 	}
 
@@ -107,34 +103,24 @@ func (s *Server) handleSearch(c *fiber.Ctx) error {
 	folders := make([]FolderEntry, 0)
 
 	// In SQLite, LIKE is case-insensitive by default for ASCII.
-	rows, err := db.Query("SELECT key, name, is_dir, size, last_modified FROM objects WHERE name LIKE ? LIMIT 600", "%"+lowerQ+"%")
+	objects, err := q.SearchObjects(c.Context(), "%"+lowerQ+"%")
 	if err != nil {
-		log.Printf("Query error: %v", err)
+		log.Printf("SearchObjects error: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Database error"})
 	}
-	defer rows.Close()
 
-	for rows.Next() {
-		var key, name, lastMod string
-		var isDir bool
-		var size int64
-
-		if err := rows.Scan(&key, &name, &isDir, &size, &lastMod); err != nil {
-			log.Printf("Row scan error: %v", err)
-			continue
-		}
-
-		if isDir {
+	for _, obj := range objects {
+		if obj.IsDir {
 			if len(folders) < 100 {
-				folders = append(folders, FolderEntry{Name: name, Path: key})
+				folders = append(folders, FolderEntry{Name: obj.Name, Path: obj.Key})
 			}
 		} else {
 			if len(files) < 500 {
 				files = append(files, FileEntry{
-					Name:         name,
-					Path:         key,
-					Size:         size,
-					LastModified: lastMod,
+					Name:         obj.Name,
+					Path:         obj.Key,
+					Size:         obj.Size,
+					LastModified: obj.LastModified,
 				})
 			}
 		}
