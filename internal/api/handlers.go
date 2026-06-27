@@ -1,40 +1,29 @@
 package api
 
 import (
-	"encoding/json"
 	"log"
-	"net/http"
 	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5"
+	"github.com/gofiber/fiber/v2"
 )
 
-func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	json.NewEncoder(w).Encode(map[string]any{
+func (s *Server) handleHealth(c *fiber.Ctx) error {
+	return c.JSON(fiber.Map{
 		"status": "ok",
 		"ts":     time.Now().UnixMilli(),
 	})
 }
 
-func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-
+func (s *Server) handleList(c *fiber.Ctx) error {
 	if s.config.S3Bucket == "" {
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": "S3_BUCKET not configured"})
-		return
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "S3_BUCKET not configured"})
 	}
 
-	prefix := r.URL.Query().Get("prefix")
+	prefix := c.Query("prefix")
 	db := s.store.GetDB()
 	if db == nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Store not initialized"})
-		return
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Store not initialized"})
 	}
 
 	files := make([]FileEntry, 0)
@@ -43,9 +32,7 @@ func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
 	rows, err := db.Query("SELECT key, name, is_dir, size, last_modified FROM objects WHERE parent = ?", prefix)
 	if err != nil {
 		log.Printf("Query error: %v", err)
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Database error"})
-		return
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Database error"})
 	}
 	defer rows.Close()
 
@@ -76,60 +63,42 @@ func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
 		Files:   files,
 	}
 
-	json.NewEncoder(w).Encode(listing)
+	return c.JSON(listing)
 }
 
-func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-
+func (s *Server) handleInfo(c *fiber.Ctx) error {
 	if s.config.S3Bucket == "" {
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": "S3_BUCKET not configured"})
-		return
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "S3_BUCKET not configured"})
 	}
 
-	key := r.URL.Query().Get("key")
+	key := c.Query("key")
 	if key == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Missing key parameter"})
-		return
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Missing key parameter"})
 	}
 
 	db := s.store.GetDB()
 	if db == nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Store not initialized"})
-		return
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Store not initialized"})
 	}
 
 	var info FileInfo
 	err := db.QueryRow("SELECT size, content_type, last_modified, etag FROM objects WHERE key = ?", key).Scan(&info.Size, &info.ContentType, &info.LastModified, &info.ETag)
 	if err != nil {
-		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Not found"})
-		return
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Not found"})
 	}
 
-	json.NewEncoder(w).Encode(info)
+	return c.JSON(info)
 }
 
-func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-
+func (s *Server) handleSearch(c *fiber.Ctx) error {
 	if s.config.S3Bucket == "" {
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": "S3_BUCKET not configured"})
-		return
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "S3_BUCKET not configured"})
 	}
 
-	query := r.URL.Query().Get("q")
+	query := c.Query("q")
 	db := s.store.GetDB()
 	if db == nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Store not initialized"})
-		return
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Store not initialized"})
 	}
 
 	lowerQ := strings.ToLower(query)
@@ -140,9 +109,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	rows, err := db.Query("SELECT key, name, is_dir, size, last_modified FROM objects WHERE name LIKE ? LIMIT 600", "%"+lowerQ+"%")
 	if err != nil {
 		log.Printf("Query error: %v", err)
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Database error"})
-		return
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Database error"})
 	}
 	defer rows.Close()
 
@@ -172,29 +139,24 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	json.NewEncoder(w).Encode(SearchResults{Files: files, Folders: folders})
+	return c.JSON(SearchResults{Files: files, Folders: folders})
 }
 
-func (s *Server) handleObjectRedirect(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-
+func (s *Server) handleObjectRedirect(c *fiber.Ctx) error {
 	if s.config.S3Bucket == "" {
-		http.Error(w, "S3_BUCKET not configured", http.StatusInternalServerError)
-		return
+		return c.Status(fiber.StatusInternalServerError).SendString("S3_BUCKET not configured")
 	}
 
-	key := chi.URLParam(r, "*")
+	key := c.Params("*")
 	if key == "" {
-		http.Error(w, "Missing key", http.StatusBadRequest)
-		return
+		return c.Status(fiber.StatusBadRequest).SendString("Missing key")
 	}
 
-	presignedUrl, err := s.s3client.GetPresignedUrl(r.Context(), key, time.Hour)
+	presignedUrl, err := s.s3client.GetPresignedUrl(c.Context(), key, time.Hour)
 	if err != nil {
 		log.Printf("GetPresignedUrl error: %v", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		return c.Status(fiber.StatusInternalServerError).SendString(err.Error())
 	}
 
-	http.Redirect(w, r, presignedUrl, http.StatusFound)
+	return c.Redirect(presignedUrl, fiber.StatusFound)
 }
