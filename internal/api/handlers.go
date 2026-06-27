@@ -2,6 +2,7 @@ package api
 
 import (
 	"log"
+	"net/url"
 	"strings"
 	"time"
 
@@ -152,7 +153,12 @@ func (s *Server) handleObjectRedirect(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).SendString("Missing key")
 	}
 
-	presignedUrl, err := s.s3client.GetPresignedUrl(c.Context(), key, time.Hour)
+	decodedKey, err := url.PathUnescape(key)
+	if err != nil {
+		decodedKey = key
+	}
+
+	presignedUrl, err := s.s3client.GetPresignedUrl(c.Context(), decodedKey, time.Hour)
 	if err != nil {
 		log.Printf("GetPresignedUrl error: %v", err)
 		return c.Status(fiber.StatusInternalServerError).SendString(err.Error())
