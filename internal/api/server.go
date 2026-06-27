@@ -64,14 +64,12 @@ func (s *Server) SetupRouter() *fiber.App {
 }
 
 func (s *Server) serveEmbeddedSPA(app *fiber.App) {
-	// Serve static files using Fiber's filesystem middleware
 	app.Use("/", filesystem.New(filesystem.Config{
 		Root:   http.FS(s.staticFS),
 		Browse: false,
 		MaxAge: 86400,
 	}))
 
-	// Fallback route for SPA - if no static file matched, serve index.html from embedded FS
 	app.Use(func(c *fiber.Ctx) error {
 		if c.Method() != fiber.MethodGet {
 			return c.SendStatus(fiber.StatusNotFound)
@@ -84,7 +82,11 @@ func (s *Server) serveEmbeddedSPA(app *fiber.App) {
 		if err != nil {
 			return c.SendStatus(fiber.StatusInternalServerError)
 		}
-		defer f.Close()
+		defer func() {
+			if cerr := f.Close(); cerr != nil {
+				log.Printf("Error closing index.html: %v", cerr)
+			}
+		}()
 
 		stat, err := f.Stat()
 		if err != nil {

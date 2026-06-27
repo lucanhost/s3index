@@ -22,6 +22,7 @@ func NewClient(cfg *config.Config) (*Client, error) {
 	minioClient, err := minio.New(host, &minio.Options{
 		Creds:  credentials.NewStaticV4(cfg.S3AccessKeyID, cfg.S3SecretAccessKey, ""),
 		Secure: secure,
+		Region: cfg.S3Region,
 	})
 	if err != nil {
 		return nil, err

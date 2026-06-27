@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"log"
 	"net/url"
 	"strings"
@@ -8,6 +9,8 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 )
+
+const requestTimeout = 5 * time.Second
 
 func (s *Server) handleHealth(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
@@ -27,10 +30,13 @@ func (s *Server) handleList(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Store not initialized"})
 	}
 
+	ctx, cancel := context.WithTimeout(c.Context(), requestTimeout)
+	defer cancel()
+
 	files := make([]FileEntry, 0)
 	folders := make([]FolderEntry, 0)
 
-	objects, err := q.ListObjectsByParent(c.Context(), prefix)
+	objects, err := q.ListObjectsByParent(ctx, prefix)
 	if err != nil {
 		log.Printf("ListObjectsByParent error: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Database error"})
@@ -72,7 +78,10 @@ func (s *Server) handleInfo(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Store not initialized"})
 	}
 
-	obj, err := q.GetObject(c.Context(), key)
+	ctx, cancel := context.WithTimeout(c.Context(), requestTimeout)
+	defer cancel()
+
+	obj, err := q.GetObject(ctx, key)
 	if err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Not found"})
 	}
@@ -98,12 +107,17 @@ func (s *Server) handleSearch(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Store not initialized"})
 	}
 
+	ctx, cancel := context.WithTimeout(c.Context(), requestTimeout)
+	defer cancel()
+
 	lowerQ := strings.ToLower(query)
+	// Escape double quotes and wrap in quotes for FTS MATCH
+	escapedQ := "\"" + strings.ReplaceAll(lowerQ, "\"", "\"\"") + "\""
+	
 	files := make([]FileEntry, 0)
 	folders := make([]FolderEntry, 0)
 
-	// In SQLite, LIKE is case-insensitive by default for ASCII.
-	objects, err := q.SearchObjects(c.Context(), "%"+lowerQ+"%")
+	objects, err := q.SearchObjects(ctx, escapedQ)
 	if err != nil {
 		log.Printf("SearchObjects error: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Database error"})
@@ -147,7 +161,7 @@ func (s *Server) handleObjectRedirect(c *fiber.Ctx) error {
 	presignedUrl, err := s.s3client.GetPresignedUrl(c.Context(), decodedKey, time.Hour)
 	if err != nil {
 		log.Printf("GetPresignedUrl error: %v", err)
-		return c.Status(fiber.StatusInternalServerError).SendString(err.Error())
+		return c.Status(fiber.StatusInternalServerError).SendString("Failed to generate presigned URL")
 	}
 
 	return c.Redirect(presignedUrl, fiber.StatusFound)

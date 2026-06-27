@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"log"
 	"time"
 
@@ -20,19 +21,26 @@ type Config struct {
 }
 
 func LoadConfig() *Config {
-	// Load .env file (ignore error if not found, as configuration can come from system env vars)
 	_ = godotenv.Load()
 
 	var cfg Config
 
-	// Parse environment variables directly into Config struct
 	if err := env.Parse(&cfg); err != nil {
-		log.Printf("Warning: Failed to parse configuration: %v", err)
+		log.Fatalf("Failed to parse configuration: %v", err)
 	}
 
 	if cfg.S3Bucket == "" {
-		log.Println("WARNING: S3_BUCKET environment variable is not set")
+		log.Fatal("S3_BUCKET environment variable is required")
 	}
+	if cfg.S3AccessKeyID == "" {
+		log.Fatal("S3_ACCESS_KEY_ID environment variable is required")
+	}
+	if cfg.S3SecretAccessKey == "" {
+		log.Fatal("S3_SECRET_ACCESS_KEY environment variable is required")
+	}
+
+	fmt.Printf("Config loaded: bucket=%s region=%s endpoint=%s port=%s sync=%s\n",
+		cfg.S3Bucket, cfg.S3Region, cfg.S3Endpoint, cfg.Port, cfg.SyncInterval)
 
 	return &cfg
 }

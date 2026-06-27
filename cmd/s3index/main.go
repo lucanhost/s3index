@@ -44,17 +44,16 @@ func main() {
 		}
 	}()
 
-	// Graceful shutdown
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
 	log.Println("Shutting down server...")
 
-	// Cancel the context to stop background workers
 	cancel()
 
-	// Fiber graceful shutdown with 5 second timeout
+	colStore.Shutdown()
+
 	if err := app.ShutdownWithTimeout(5 * time.Second); err != nil {
 		log.Fatalf("Server forced to shutdown: %v", err)
 	}

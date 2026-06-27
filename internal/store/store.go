@@ -3,10 +3,12 @@ package store
 import (
 	"context"
 	"database/sql"
+	_ "embed"
 	"log"
 	"mime"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -14,6 +16,9 @@ import (
 	"github.com/lucanhost/s3index/internal/s3client"
 	_ "modernc.org/sqlite"
 )
+
+//go:embed schema.sql
+var schemaSQL string
 
 type DBState struct {
 	DB      *sql.DB
@@ -23,24 +28,8 @@ type DBState struct {
 type Store struct {
 	state    atomic.Pointer[DBState]
 	s3client *s3client.Client
+	wg       sync.WaitGroup
 }
-
-const schemaSQL = `
-CREATE TABLE objects (
-    key TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    parent TEXT NOT NULL,
-    is_dir BOOLEAN NOT NULL,
-    size INTEGER NOT NULL,
-    last_modified TEXT NOT NULL,
-    content_type TEXT NOT NULL,
-    etag TEXT NOT NULL
-);
-
-CREATE INDEX objects_parent_idx ON objects(parent);
-CREATE INDEX objects_name_idx ON objects(name);
-CREATE INDEX objects_is_dir_idx ON objects(is_dir);
-`
 
 func NewStore(ctx context.Context, client *s3client.Client, syncInterval time.Duration) *Store {
 	s := &Store{
@@ -58,12 +47,20 @@ func NewStore(ctx context.Context, client *s3client.Client, syncInterval time.Du
 
 	s.state.Store(newState)
 
-	// Start background sync worker if interval is positive
 	if syncInterval > 0 {
+		s.wg.Add(1)
 		go s.startSyncWorker(ctx, syncInterval)
 	}
 
 	return s
+}
+
+func (s *Store) Shutdown() {
+	s.wg.Wait()
+	state := s.state.Load()
+	if state != nil && state.DB != nil {
+		state.DB.Close()
+	}
 }
 
 func (s *Store) GetQueries() *db.Queries {
@@ -116,7 +113,6 @@ func (s *Store) fetchAndCreateDB(ctx context.Context) (*DBState, error) {
 			return nil, obj.Err
 		}
 
-		// Skip explicit folder placeholders if they just end with slash
 		if strings.HasSuffix(obj.Key, "/") {
 			continue
 		}
@@ -126,12 +122,14 @@ func (s *Store) fetchAndCreateDB(ctx context.Context) (*DBState, error) {
 			contentType = guessContentType(obj.Key)
 		}
 
-		parts := strings.Split(obj.Key, "/")
-		fileName := parts[len(parts)-1]
-
-		var parentPrefix string
-		if len(parts) > 1 {
-			parentPrefix = strings.Join(parts[:len(parts)-1], "/") + "/"
+		lastSlash := strings.LastIndexByte(obj.Key, '/')
+		var fileName, parentPrefix string
+		if lastSlash == -1 {
+			fileName = obj.Key
+			parentPrefix = ""
+		} else {
+			fileName = obj.Key[lastSlash+1:]
+			parentPrefix = obj.Key[:lastSlash+1]
 		}
 
 		err = qtx.InsertObject(fetchCtx, db.InsertObjectParams{
@@ -148,21 +146,31 @@ func (s *Store) fetchAndCreateDB(ctx context.Context) (*DBState, error) {
 			return nil, err
 		}
 
-		// Add parent directories recursively
-		for i := len(parts) - 2; i >= 0; i-- {
-			var currentPrefix string
-			if i > 0 {
-				currentPrefix = strings.Join(parts[:i], "/") + "/"
+		// Create parent directories efficiently without splitting
+		current := 0
+		for {
+			idx := strings.IndexByte(obj.Key[current:], '/')
+			if idx == -1 {
+				break
 			}
-			folderName := parts[i]
-			folderPath := strings.Join(parts[:i+1], "/") + "/"
+			folderEnd := current + idx + 1
+			folderPath := obj.Key[:folderEnd]
 
 			if !folders[folderPath] {
 				folders[folderPath] = true
+
+				parentPath := ""
+				folderName := folderPath[:len(folderPath)-1] // remove trailing slash
+				lastParentSlash := strings.LastIndexByte(folderName, '/')
+				if lastParentSlash != -1 {
+					parentPath = folderName[:lastParentSlash+1]
+					folderName = folderName[lastParentSlash+1:]
+				}
+
 				err = qtx.InsertObject(fetchCtx, db.InsertObjectParams{
 					Key:          folderPath,
 					Name:         folderName,
-					Parent:       currentPrefix,
+					Parent:       parentPath,
 					IsDir:        true,
 					Size:         0,
 					LastModified: "",
@@ -173,6 +181,7 @@ func (s *Store) fetchAndCreateDB(ctx context.Context) (*DBState, error) {
 					return nil, err
 				}
 			}
+			current = folderEnd
 		}
 	}
 
@@ -184,6 +193,8 @@ func (s *Store) fetchAndCreateDB(ctx context.Context) (*DBState, error) {
 }
 
 func (s *Store) startSyncWorker(ctx context.Context, interval time.Duration) {
+	defer s.wg.Done()
+
 	log.Printf("Starting background S3 sync worker with interval: %s", interval)
 
 	ticker := time.NewTicker(interval)
@@ -202,7 +213,6 @@ func (s *Store) startSyncWorker(ctx context.Context, interval time.Duration) {
 				continue
 			}
 
-			// Atomic swap, then close the old DB
 			oldState := s.state.Swap(newState)
 			if oldState != nil && oldState.DB != nil {
 				oldState.DB.Close()

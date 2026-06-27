@@ -14,3 +14,8 @@ type Object struct {
 	ContentType  string
 	Etag         string
 }
+
+type ObjectsFt struct {
+	Name string
+	Key  string
+}

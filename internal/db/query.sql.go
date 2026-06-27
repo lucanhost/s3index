@@ -111,9 +111,10 @@ func (q *Queries) ListObjectsByParent(ctx context.Context, parent string) ([]Lis
 }
 
 const searchObjects = `-- name: SearchObjects :many
-SELECT key, name, is_dir, size, last_modified
-FROM objects
-WHERE name LIKE ? LIMIT 600
+SELECT o.key, o.name, o.is_dir, o.size, o.last_modified
+FROM objects o
+JOIN objects_fts f ON o.key = f.key
+WHERE f.name MATCH ? LIMIT 600
 `
 
 type SearchObjectsRow struct {
