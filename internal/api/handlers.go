@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kelindar/column"
+	"github.com/go-chi/chi/v5"
 )
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -30,8 +30,8 @@ func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
 	}
 
 	prefix := r.URL.Query().Get("prefix")
-	col := s.store.GetCollection()
-	if col == nil {
+	db := s.store.GetDB()
+	if db == nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": "Store not initialized"})
 		return
@@ -40,34 +40,36 @@ func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
 	files := make([]FileEntry, 0)
 	folders := make([]FolderEntry, 0)
 
-	col.Query(func(txn *column.Txn) error {
-		name := txn.String("name")
-		key := txn.String("key")
-		isDir := txn.Bool("is_dir")
-		size := txn.Int64("size")
-		lastMod := txn.String("last_modified")
+	rows, err := db.Query("SELECT key, name, is_dir, size, last_modified FROM objects WHERE parent = ?", prefix)
+	if err != nil {
+		log.Printf("Query error: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Database error"})
+		return
+	}
+	defer rows.Close()
 
-		return txn.WithString("parent", func(v string) bool {
-			return v == prefix
-		}).Range(func(i uint32) {
-			n, _ := name.Get()
-			k, _ := key.Get()
-			dir := isDir.Get()
+	for rows.Next() {
+		var key, name, lastMod string
+		var isDir bool
+		var size int64
 
-			if dir {
-				folders = append(folders, FolderEntry{Name: n, Path: k})
-			} else {
-				sz, _ := size.Get()
-				lm, _ := lastMod.Get()
-				files = append(files, FileEntry{
-					Name:         n,
-					Path:         k,
-					Size:         sz,
-					LastModified: lm,
-				})
-			}
-		})
-	})
+		if err := rows.Scan(&key, &name, &isDir, &size, &lastMod); err != nil {
+			log.Printf("Row scan error: %v", err)
+			continue
+		}
+
+		if isDir {
+			folders = append(folders, FolderEntry{Name: name, Path: key})
+		} else {
+			files = append(files, FileEntry{
+				Name:         name,
+				Path:         key,
+				Size:         size,
+				LastModified: lastMod,
+			})
+		}
+	}
 
 	listing := &DirectoryListing{
 		Folders: folders,
@@ -94,34 +96,16 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	col := s.store.GetCollection()
-	if col == nil {
+	db := s.store.GetDB()
+	if db == nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": "Store not initialized"})
 		return
 	}
 
 	var info FileInfo
-	var found bool
-
-	col.Query(func(txn *column.Txn) error {
-		size := txn.Int64("size")
-		cType := txn.String("content_type")
-		lastMod := txn.String("last_modified")
-		etag := txn.String("etag")
-
-		return txn.WithString("key", func(v string) bool {
-			return v == key
-		}).Range(func(i uint32) {
-			found = true
-			info.Size, _ = size.Get()
-			info.ContentType, _ = cType.Get()
-			info.LastModified, _ = lastMod.Get()
-			info.ETag, _ = etag.Get()
-		})
-	})
-
-	if !found {
+	err := db.QueryRow("SELECT size, content_type, last_modified, etag FROM objects WHERE key = ?", key).Scan(&info.Size, &info.ContentType, &info.LastModified, &info.ETag)
+	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
 		json.NewEncoder(w).Encode(map[string]string{"error": "Not found"})
 		return
@@ -141,8 +125,8 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	query := r.URL.Query().Get("q")
-	col := s.store.GetCollection()
-	if col == nil {
+	db := s.store.GetDB()
+	if db == nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": "Store not initialized"})
 		return
@@ -152,38 +136,41 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	files := make([]FileEntry, 0)
 	folders := make([]FolderEntry, 0)
 
-	col.Query(func(txn *column.Txn) error {
-		name := txn.String("name")
-		key := txn.String("key")
-		isDir := txn.Bool("is_dir")
-		size := txn.Int64("size")
-		lastMod := txn.String("last_modified")
+	// In SQLite, LIKE is case-insensitive by default for ASCII.
+	rows, err := db.Query("SELECT key, name, is_dir, size, last_modified FROM objects WHERE name LIKE ? LIMIT 600", "%"+lowerQ+"%")
+	if err != nil {
+		log.Printf("Query error: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Database error"})
+		return
+	}
+	defer rows.Close()
 
-		return txn.WithString("name", func(v string) bool {
-			return strings.Contains(strings.ToLower(v), lowerQ)
-		}).Range(func(i uint32) {
-			n, _ := name.Get()
-			k, _ := key.Get()
-			dir := isDir.Get()
+	for rows.Next() {
+		var key, name, lastMod string
+		var isDir bool
+		var size int64
 
-			if dir {
-				if len(folders) < 100 {
-					folders = append(folders, FolderEntry{Name: n, Path: k})
-				}
-			} else {
-				if len(files) < 500 {
-					sz, _ := size.Get()
-					lm, _ := lastMod.Get()
-					files = append(files, FileEntry{
-						Name:         n,
-						Path:         k,
-						Size:         sz,
-						LastModified: lm,
-					})
-				}
+		if err := rows.Scan(&key, &name, &isDir, &size, &lastMod); err != nil {
+			log.Printf("Row scan error: %v", err)
+			continue
+		}
+
+		if isDir {
+			if len(folders) < 100 {
+				folders = append(folders, FolderEntry{Name: name, Path: key})
 			}
-		})
-	})
+		} else {
+			if len(files) < 500 {
+				files = append(files, FileEntry{
+					Name:         name,
+					Path:         key,
+					Size:         size,
+					LastModified: lastMod,
+				})
+			}
+		}
+	}
 
 	json.NewEncoder(w).Encode(SearchResults{Files: files, Folders: folders})
 }
@@ -196,7 +183,7 @@ func (s *Server) handleObjectRedirect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	key := r.PathValue("key")
+	key := chi.URLParam(r, "*")
 	if key == "" {
 		http.Error(w, "Missing key", http.StatusBadRequest)
 		return

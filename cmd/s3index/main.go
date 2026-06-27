@@ -31,19 +31,16 @@ func main() {
 	colStore := store.NewStore(ctx, s3Client, cfg.SyncInterval)
 
 	staticFS, err := fs.Sub(s3index.EmbedFS, "frontend/dist")
-	var indexHTML []byte
-	if err == nil {
-		indexHTML, _ = s3index.EmbedFS.ReadFile("frontend/dist/index.html")
+	if err != nil {
+		staticFS = nil
 	}
 
-	server := api.NewServer(cfg, s3Client, colStore, staticFS, indexHTML)
-
-	mux := http.NewServeMux()
-	server.RegisterRoutes(mux)
+	server := api.NewServer(cfg, s3Client, colStore, staticFS)
+	router := server.SetupRouter()
 
 	httpServer := &http.Server{
 		Addr:    ":" + cfg.Port,
-		Handler: mux,
+		Handler: router,
 	}
 
 	go func() {

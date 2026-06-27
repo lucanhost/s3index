@@ -37,7 +37,7 @@
       </div>
 
       <!-- Name -->
-      <span class="flex-1 min-w-0 text-sm text-slate-200 group-hover:text-white transition-colors font-medium truncate">
+      <span class="flex-1 text-sm text-slate-200 group-hover:text-white transition-colors font-medium truncate">
         {folder.name}
       </span>
 
@@ -61,7 +61,7 @@
 
       <!-- Name -->
       <button
-        class="flex-1 min-w-0 text-sm text-slate-300 group-hover:text-white transition-colors text-left truncate cursor-pointer hover:text-purple-300"
+        class="flex-1 text-sm text-slate-300 group-hover:text-white transition-colors text-left truncate cursor-pointer hover:text-purple-300"
         onclick={() => onPreview(file)}
         title={file.name}
       >
