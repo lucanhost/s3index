@@ -4,6 +4,7 @@ import (
 	"context"
 	"io/fs"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -35,11 +36,16 @@ func main() {
 	}
 
 	server := api.NewServer(cfg, s3Client, colStore, staticFS)
-	app := server.SetupRouter()
+	mux := server.SetupRouter()
+
+	httpServer := &http.Server{
+		Addr:    ":" + cfg.Port,
+		Handler: mux,
+	}
 
 	go func() {
 		log.Printf("Server listening on port %s", cfg.Port)
-		if err := app.Listen(":" + cfg.Port); err != nil {
+		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Server failed to start: %v", err)
 		}
 	}()
@@ -54,7 +60,9 @@ func main() {
 
 	colStore.Shutdown()
 
-	if err := app.ShutdownWithTimeout(5 * time.Second); err != nil {
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutdownCancel()
+	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		log.Fatalf("Server forced to shutdown: %v", err)
 	}
 

@@ -1,14 +1,10 @@
 package api
-
 import (
+	"io"
 	"io/fs"
 	"log"
 	"net/http"
-
-	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/fiber/v2/middleware/filesystem"
-	"github.com/gofiber/fiber/v2/middleware/logger"
-	"github.com/gofiber/fiber/v2/middleware/recover"
+	"strings"
 	"github.com/lucanhost/s3index/internal/config"
 	"github.com/lucanhost/s3index/internal/s3client"
 	"github.com/lucanhost/s3index/internal/store"
@@ -30,74 +26,69 @@ func NewServer(cfg *config.Config, s3c *s3client.Client, st *store.Store, static
 	}
 }
 
-func (s *Server) SetupRouter() *fiber.App {
-	app := fiber.New(fiber.Config{
-		DisableStartupMessage: true,
-	})
+func (s *Server) SetupRouter() *http.ServeMux {
+	mux := http.NewServeMux()
 
-	app.Use(recover.New())
-	app.Use(logger.New())
-
-	apiGroup := app.Group("/api")
-	apiGroup.Get("/health", s.handleHealth)
-	apiGroup.Get("/list", s.handleList)
-	apiGroup.Get("/info", s.handleInfo)
-	apiGroup.Get("/search", s.handleSearch)
-	apiGroup.Get("/object/*", s.handleObjectRedirect)
+	mux.HandleFunc("GET /api/health", s.handleHealth)
+	mux.HandleFunc("GET /api/list", s.handleList)
+	mux.HandleFunc("GET /api/info", s.handleInfo)
+	mux.HandleFunc("GET /api/search", s.handleSearch)
+	mux.HandleFunc("GET /api/object/{key...}", s.handleObjectRedirect)
 
 	if s.staticFS != nil {
 		log.Println("Serving embedded Svelte frontend from frontend/dist/")
-		s.serveEmbeddedSPA(app)
+		s.serveEmbeddedSPA(mux)
 	} else {
 		log.Println("WARNING: Frontend frontend/dist/ files not found or not built. Serving HTTP API only.")
-		app.Use(func(c *fiber.Ctx) error {
-			if c.Path() == "/" {
-				return c.JSON(fiber.Map{
-					"message": "S3 Index API is active. Frontend assets not embedded.",
-				})
+		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/" {
+				w.Header().Set("Content-Type", "application/json")
+				w.Write([]byte(`{"message": "S3 Index API is active. Frontend assets not embedded."}`))
+				return
 			}
-			return c.SendStatus(fiber.StatusNotFound)
+			http.NotFound(w, r)
 		})
 	}
 
-	return app
+	return mux
 }
 
-func (s *Server) serveEmbeddedSPA(app *fiber.App) {
-	app.Use("/", filesystem.New(filesystem.Config{
-		Root:   http.FS(s.staticFS),
-		Browse: false,
-		MaxAge: 86400,
-	}))
+func (s *Server) serveEmbeddedSPA(mux *http.ServeMux) {
+	fileServer := http.FileServer(http.FS(s.staticFS))
 
-	app.Use(func(c *fiber.Ctx) error {
-		if c.Method() != fiber.MethodGet {
-			return c.SendStatus(fiber.StatusNotFound)
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// Attempt to open the exact file
+		f, err := s.staticFS.Open(strings.TrimPrefix(r.URL.Path, "/"))
+		if err == nil {
+			f.Close()
+			// File exists, serve it with FileServer
+			w.Header().Set("Cache-Control", "public, max-age=86400")
+			fileServer.ServeHTTP(w, r)
+			return
 		}
 
-		c.Set("Cache-Control", "no-cache, no-store, must-revalidate")
-		c.Type("html")
+		// File does not exist, serve index.html (SPA fallback)
+		if r.Method != http.MethodGet {
+			http.NotFound(w, r)
+			return
+		}
 
-		f, err := s.staticFS.Open("index.html")
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+
+		idx, err := s.staticFS.Open("index.html")
 		if err != nil {
-			return c.SendStatus(fiber.StatusInternalServerError)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
 		}
-		defer func() {
-			if cerr := f.Close(); cerr != nil {
-				log.Printf("Error closing index.html: %v", cerr)
-			}
-		}()
+		defer idx.Close()
 
-		stat, err := f.Stat()
+		stat, err := idx.Stat()
 		if err != nil {
-			return c.SendStatus(fiber.StatusInternalServerError)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
 		}
-
-		buf := make([]byte, stat.Size())
-		if _, err := f.Read(buf); err != nil {
-			return c.SendStatus(fiber.StatusInternalServerError)
-		}
-
-		return c.Send(buf)
+		
+		http.ServeContent(w, r, "index.html", stat.ModTime(), idx.(io.ReadSeeker))
 	})
 }
