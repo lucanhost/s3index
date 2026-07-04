@@ -64,17 +64,27 @@
         if (found) previewFile = found;
       }
 
-      // Check for README.md
+      // Check for README.md - load asynchronously without blocking file list
       const hasReadme = data.files.some(f => f.name.toLowerCase() === 'readme.md');
       if (hasReadme) {
-        loadingReadme = true;
-        readmeContent = await getReadme(newPrefix);
-        loadingReadme = false;
+        // Fire and forget - README loads independently
+        loadReadmeAsync(newPrefix);
       }
     } catch (e: any) {
       error = e.message || 'Failed to load directory';
     } finally {
       loading = false;
+    }
+  }
+
+  async function loadReadmeAsync(prefix: string) {
+    loadingReadme = true;
+    try {
+      readmeContent = await getReadme(prefix);
+    } catch {
+      // Silently fail - README is optional
+    } finally {
+      loadingReadme = false;
     }
   }
 
@@ -283,9 +293,21 @@
 
       <!-- README.md section -->
       {#if loadingReadme}
-        <div class="mt-6 glass rounded-xl border border-white/8 p-6">
-          <div class="flex items-center gap-2 text-slate-400 text-sm">
-            <span class="animate-spin">◌</span> Loading README...
+        <div class="mt-6 glass rounded-xl border border-white/8 overflow-hidden">
+          <!-- README header skeleton -->
+          <div class="px-5 py-3 border-b border-white/8 flex items-center gap-2 bg-white/[0.02]">
+            <div class="w-4 h-4 rounded bg-white/5 animate-pulse"></div>
+            <div class="h-3 w-20 rounded bg-white/5 animate-pulse"></div>
+          </div>
+          <!-- README content skeleton -->
+          <div class="p-6 space-y-3">
+            <div class="h-4 rounded bg-white/5 animate-pulse w-3/4"></div>
+            <div class="h-3 rounded bg-white/5 animate-pulse w-full"></div>
+            <div class="h-3 rounded bg-white/5 animate-pulse w-5/6"></div>
+            <div class="h-3 rounded bg-white/5 animate-pulse w-2/3"></div>
+            <div class="h-4 rounded bg-white/5 animate-pulse w-1/2 mt-4"></div>
+            <div class="h-3 rounded bg-white/5 animate-pulse w-full"></div>
+            <div class="h-3 rounded bg-white/5 animate-pulse w-4/5"></div>
           </div>
         </div>
       {:else if readmeContent}

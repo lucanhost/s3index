@@ -8,87 +8,76 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/lucanhost/s3index/internal/db"
 )
 
 const requestTimeout = 5 * time.Second
 
-func jsonResponse(w http.ResponseWriter, status int, data interface{}) {
+// writeJSON writes a JSON response
+func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(data); err != nil {
-		log.Printf("JSON encode error: %v", err)
-	}
+	_ = json.NewEncoder(w).Encode(data)
 }
 
+// errorJSON writes an error JSON response
+func errorJSON(w http.ResponseWriter, status int, msg string) {
+	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+// handleHealth returns service status
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	jsonResponse(w, http.StatusOK, map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"status": "ok",
 		"ts":     time.Now().UnixMilli(),
 	})
 }
 
+// handleList returns directory contents
 func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
 	if s.config.S3Bucket == "" {
-		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "S3_BUCKET not configured"})
+		errorJSON(w, http.StatusInternalServerError, "S3_BUCKET not configured")
 		return
 	}
 
 	prefix := r.URL.Query().Get("prefix")
 	q := s.store.GetQueries()
 	if q == nil {
-		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "Store not initialized"})
+		errorJSON(w, http.StatusInternalServerError, "Store not initialized")
 		return
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), requestTimeout)
 	defer cancel()
 
-	objects, err := q.ListObjectsByParent(ctx, prefix)
+	rows, err := q.ListObjectsByParent(ctx, prefix)
 	if err != nil {
 		log.Printf("ListObjectsByParent error: %v", err)
-		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "Database error"})
+		errorJSON(w, http.StatusInternalServerError, "Database error")
 		return
 	}
 
-	files := make([]FileEntry, 0, len(objects))
-	folders := make([]FolderEntry, 0, len(objects))
-
-	for _, obj := range objects {
-		if obj.IsDir {
-			folders = append(folders, FolderEntry{Name: obj.Name, Path: obj.Key})
-		} else {
-			files = append(files, FileEntry{
-				Name:         obj.Name,
-				Path:         obj.Key,
-				Size:         obj.Size,
-				LastModified: obj.LastModified,
-			})
-		}
-	}
-
-	listing := &DirectoryListing{
-		Folders: folders,
-		Files:   files,
-	}
-
-	jsonResponse(w, http.StatusOK, listing)
+	files, folders := toEntries(rows)
+	writeJSON(w, http.StatusOK, DirectoryListing{Folders: folders, Files: files})
 }
 
+// handleInfo returns file metadata
 func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 	if s.config.S3Bucket == "" {
-		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "S3_BUCKET not configured"})
+		errorJSON(w, http.StatusInternalServerError, "S3_BUCKET not configured")
 		return
 	}
 
 	key := r.URL.Query().Get("key")
 	if key == "" {
-		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "Missing key parameter"})
+		errorJSON(w, http.StatusBadRequest, "Missing key parameter")
 		return
 	}
 
 	q := s.store.GetQueries()
 	if q == nil {
-		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "Store not initialized"})
+		errorJSON(w, http.StatusInternalServerError, "Store not initialized")
 		return
 	}
 
@@ -97,30 +86,29 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 
 	obj, err := q.GetObject(ctx, key)
 	if err != nil {
-		jsonResponse(w, http.StatusNotFound, map[string]string{"error": "Not found"})
+		errorJSON(w, http.StatusNotFound, "Not found")
 		return
 	}
 
-	info := FileInfo{
+	writeJSON(w, http.StatusOK, FileInfo{
 		Size:         obj.Size,
 		ContentType:  obj.ContentType,
 		LastModified: obj.LastModified,
 		ETag:         obj.Etag,
-	}
-
-	jsonResponse(w, http.StatusOK, info)
+	})
 }
 
+// handleSearch returns search results
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	if s.config.S3Bucket == "" {
-		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "S3_BUCKET not configured"})
+		errorJSON(w, http.StatusInternalServerError, "S3_BUCKET not configured")
 		return
 	}
 
 	query := r.URL.Query().Get("q")
 	q := s.store.GetQueries()
 	if q == nil {
-		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "Store not initialized"})
+		errorJSON(w, http.StatusInternalServerError, "Store not initialized")
 		return
 	}
 
@@ -129,37 +117,26 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 
 	lowerQ := strings.ToLower(query)
 	escapedQ := "\"" + strings.ReplaceAll(lowerQ, "\"", "\"\"") + "\""
-	
-	objects, err := q.SearchObjects(ctx, escapedQ)
+
+	rows, err := q.SearchObjects(ctx, escapedQ)
 	if err != nil {
 		log.Printf("SearchObjects error: %v", err)
-		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "Database error"})
+		errorJSON(w, http.StatusInternalServerError, "Database error")
 		return
 	}
 
-	files := make([]FileEntry, 0, len(objects))
-	folders := make([]FolderEntry, 0, len(objects))
-
-	for _, obj := range objects {
-		if obj.IsDir {
-			if len(folders) < 100 {
-				folders = append(folders, FolderEntry{Name: obj.Name, Path: obj.Key})
-			}
-		} else {
-			if len(files) < 500 {
-				files = append(files, FileEntry{
-					Name:         obj.Name,
-					Path:         obj.Key,
-					Size:         obj.Size,
-					LastModified: obj.LastModified,
-				})
-			}
-		}
-	}
-
-	jsonResponse(w, http.StatusOK, SearchResults{Files: files, Folders: folders})
+	files, folders := toEntriesLimited(rows, 500, 100)
+	writeJSON(w, http.StatusOK, SearchResults{Files: files, Folders: folders})
 }
 
+// handleSync triggers immediate sync
+func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
+	_ = s.config.S3Bucket // validate config
+	s.store.TriggerSync()
+	writeJSON(w, http.StatusAccepted, map[string]string{"message": "Sync triggered"})
+}
+
+// handleObjectRedirect generates S3 presigned URL
 func (s *Server) handleObjectRedirect(w http.ResponseWriter, r *http.Request) {
 	if s.config.S3Bucket == "" {
 		http.Error(w, "S3_BUCKET not configured", http.StatusInternalServerError)
@@ -185,4 +162,48 @@ func (s *Server) handleObjectRedirect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.Redirect(w, r, presignedUrl, http.StatusFound)
+}
+
+// toEntries converts db rows to FileEntry/FolderEntry slices
+func toEntries(rows []db.ListObjectsByParentRow) ([]FileEntry, []FolderEntry) {
+	files := make([]FileEntry, 0, len(rows))
+	folders := make([]FolderEntry, 0, len(rows))
+
+	for _, obj := range rows {
+		if obj.IsDir {
+			folders = append(folders, FolderEntry{Name: obj.Name, Path: obj.Key})
+		} else {
+			files = append(files, FileEntry{
+				Name:         obj.Name,
+				Path:         obj.Key,
+				Size:         obj.Size,
+				LastModified: obj.LastModified,
+			})
+		}
+	}
+	return files, folders
+}
+
+// toEntriesLimited limits the number of returned entries
+func toEntriesLimited(rows []db.SearchObjectsRow, maxFiles, maxFolders int) ([]FileEntry, []FolderEntry) {
+	files := make([]FileEntry, 0, len(rows))
+	folders := make([]FolderEntry, 0, len(rows))
+
+	for _, obj := range rows {
+		if obj.IsDir {
+			if len(folders) < maxFolders {
+				folders = append(folders, FolderEntry{Name: obj.Name, Path: obj.Key})
+			}
+		} else {
+			if len(files) < maxFiles {
+				files = append(files, FileEntry{
+					Name:         obj.Name,
+					Path:         obj.Key,
+					Size:         obj.Size,
+					LastModified: obj.LastModified,
+				})
+			}
+		}
+	}
+	return files, folders
 }

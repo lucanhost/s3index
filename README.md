@@ -16,6 +16,7 @@ A modern S3-compatible storage file browser. It features a standalone Golang bac
 | `/api/list?prefix=<prefix>` | `GET` | List folder contents |
 | `/api/info?key=<key>` | `GET` | Get file metadata |
 | `/api/search?q=<query>` | `GET` | Search all files and folders in bucket |
+| `/api/sync` | `POST` | Trigger immediate sync of bucket contents |
 | `/api/object/{key...}` | `GET` | Generates S3 presigned URL for object |
 | `/*` | `GET` | Serves embedded frontend static files |
 
@@ -48,3 +49,12 @@ A modern S3-compatible storage file browser. It features a standalone Golang bac
    ```bash
    docker compose up --build -d
    ```
+
+## Documentation
+
+- [Architecture](docs/architecture.md) - System architecture documentation
+- [S3 CORS Configuration](docs/s3-cors-guide.md) - Guide to enable CORS for file preview
+
+## Troubleshooting
+
+**File previews not loading?** You may need to [configure CORS](docs/s3-cors-guide.md) on your S3 bucket to allow cross-origin requests for image/video/PDF previews.

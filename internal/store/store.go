@@ -28,11 +28,13 @@ type Store struct {
 	state    atomic.Pointer[DBState]
 	s3client *s3client.Client
 	wg       sync.WaitGroup
+	trigger  chan struct{} // Channel to trigger immediate sync
 }
 
 func NewStore(ctx context.Context, client *s3client.Client, syncInterval time.Duration) *Store {
 	s := &Store{
 		s3client: client,
+		trigger:  make(chan struct{}, 1),
 	}
 
 	log.Println("Performing initial S3 object prefetch...")
@@ -70,6 +72,15 @@ func (s *Store) GetQueries() *db.Queries {
 	return nil
 }
 
+// TriggerSync requests an immediate sync. Non-blocking - safe to call from handlers.
+func (s *Store) TriggerSync() {
+	select {
+	case s.trigger <- struct{}{}:
+	default:
+		// Trigger already pending, skip
+	}
+}
+
 func createEmptyDB() (*DBState, error) {
 	conn, err := driver.Open("file::memory:?mode=memory", fts5.Register)
 	if err != nil {
@@ -77,8 +88,11 @@ func createEmptyDB() (*DBState, error) {
 	}
 	conn.SetMaxOpenConns(1)
 
-	// Optimize page size to reduce libc malloc overhead for in-memory DBs
+	// Performance optimizations for in-memory SQLite
 	conn.Exec("PRAGMA page_size = 8192;")
+	conn.Exec("PRAGMA cache_size = 10000;")      // Larger cache for in-memory
+	conn.Exec("PRAGMA journal_mode = MEMORY;")     // No disk writes
+	conn.Exec("PRAGMA synchronous = OFF;")          // Faster commits
 
 	if _, err := conn.Exec(db.SchemaSQL); err != nil {
 		return nil, err
@@ -211,20 +225,27 @@ func (s *Store) startSyncWorker(ctx context.Context, interval time.Duration) {
 			log.Println("Stopping S3 sync worker.")
 			return
 		case <-ticker.C:
-			log.Println("Starting background S3 sync...")
-			newState, err := s.fetchAndCreateDB(ctx)
-			if err != nil {
-				log.Printf("Background S3 sync error: %v", err)
-				continue
-			}
-
-			oldState := s.state.Swap(newState)
-			if oldState != nil && oldState.DB != nil {
-				oldState.DB.Close()
-			}
-			log.Println("Background S3 sync complete.")
+			s.performSync(ctx)
+		case <-s.trigger:
+			log.Println("Immediate sync triggered...")
+			s.performSync(ctx)
 		}
 	}
+}
+
+// performSync executes the sync operation and swaps the database state
+func (s *Store) performSync(ctx context.Context) {
+	newState, err := s.fetchAndCreateDB(ctx)
+	if err != nil {
+		log.Printf("S3 sync error: %v", err)
+		return
+	}
+
+	oldState := s.state.Swap(newState)
+	if oldState != nil && oldState.DB != nil {
+		oldState.DB.Close()
+	}
+	log.Println("S3 sync complete.")
 }
 
 func guessContentType(key string) string {

@@ -9,9 +9,10 @@
 
   let query = '';
   let inputEl: HTMLInputElement;
+  // Display state
   let resultFiles: FileEntry[] = [];
   let resultFolders: FolderEntry[] = [];
-  let loading = false;
+  let searchState: 'idle' | 'searching' | 'done' = 'idle';
   let debounceTimer: ReturnType<typeof setTimeout>;
 
   function close() {
@@ -19,22 +20,32 @@
     query = '';
     resultFiles = [];
     resultFolders = [];
+    searchState = 'idle';
   }
 
   async function doSearch(q: string) {
-    if (q.length < 1) { resultFiles = []; resultFolders = []; return; }
-    loading = true;
+    if (q.length === 0) {
+      searchState = 'idle';
+      resultFiles = [];
+      resultFolders = [];
+      return;
+    }
     try {
+      // searchState already set to 'searching' in onInput
       const res = await searchFiles(q);
       resultFiles = res.files;
       resultFolders = res.folders;
     } finally {
-      loading = false;
+      searchState = 'done';  // Show results (or "No results")
     }
   }
 
   function onInput() {
     clearTimeout(debounceTimer);
+    // Set searching state immediately to prevent "No results" flash
+    if (query.length > 0) {
+      searchState = 'searching';
+    }
     debounceTimer = setTimeout(() => doSearch(query), 300);
   }
 
@@ -67,7 +78,7 @@
     >
       <!-- Input -->
       <div class="flex items-center gap-3 px-4 py-3.5 border-b border-white/8">
-        {#if loading}
+        {#if searchState === 'searching'}
           <svg class="text-purple-400 flex-shrink-0 animate-spin" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
           </svg>
@@ -97,7 +108,7 @@
             <p class="text-sm">Search across all files and folders in bucket</p>
           </div>
 
-        {:else if loading && !hasResults}
+        {:else if searchState === 'searching'}
           <div class="flex items-center justify-center py-10 text-slate-500 text-sm">Searching…</div>
 
         {:else if !hasResults}

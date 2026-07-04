@@ -195,48 +195,75 @@
         <!-- Image preview -->
         {#if category === 'image'}
           <div class="flex items-center justify-center p-6 bg-black/30 min-h-64">
-            <img
-              src={objectUrl}
-              alt={file.name}
-              class="max-w-full max-h-[60vh] object-contain rounded-lg shadow-xl"
-            />
+            {#if loadingInfo}
+              <div class="flex flex-col items-center gap-4">
+                <div class="w-16 h-16 rounded-lg bg-white/5 animate-pulse"></div>
+                <div class="h-3 w-32 rounded bg-white/5 animate-pulse"></div>
+              </div>
+            {:else}
+              <img
+                src={objectUrl}
+                alt={file.name}
+                class="max-w-full max-h-[60vh] object-contain rounded-lg shadow-xl"
+                loading="lazy"
+              />
+            {/if}
           </div>
 
         <!-- Video preview -->
         {:else if category === 'video'}
           <div class="bg-black p-4">
-            <!-- svelte-ignore a11y-media-has-caption -->
-            <video
-              src={objectUrl}
-              controls
-              class="w-full max-h-[55vh] rounded-lg"
-              preload="metadata"
-            ></video>
+            {#if loadingInfo}
+              <div class="h-12 w-full rounded bg-white/5 animate-pulse"></div>
+            {:else}
+              <!-- svelte-ignore a11y-media-has-caption -->
+              <video
+                src={objectUrl}
+                controls
+                class="w-full max-h-[55vh] rounded-lg"
+                preload="metadata"
+              ></video>
+            {/if}
           </div>
 
         <!-- Audio preview -->
         {:else if category === 'audio'}
           <div class="flex flex-col items-center justify-center p-12 gap-6">
-            <div class="w-20 h-20 rounded-full bg-orange-400/10 border border-orange-400/20 flex items-center justify-center">
-              <FileIcon category="audio" size={36} className="text-orange-400" />
-            </div>
-            <audio src={objectUrl} controls class="w-full max-w-md" preload="metadata"></audio>
+            {#if loadingInfo}
+              <div class="h-12 w-12 rounded-full bg-white/5 animate-pulse flex items-center justify-center">
+                <div class="w-6 h-6 rounded bg-white/10"></div>
+              </div>
+              <div class="h-10 w-64 rounded bg-white/5 animate-pulse"></div>
+            {:else}
+              <div class="w-20 h-20 rounded-full bg-orange-400/10 border border-orange-400/20 flex items-center justify-center">
+                <FileIcon category="audio" size={36} className="text-orange-400" />
+              </div>
+              <audio src={objectUrl} controls class="w-full max-w-md" preload="metadata"></audio>
+            {/if}
           </div>
 
         <!-- PDF preview -->
         {:else if category === 'pdf'}
-          <iframe
-            src={objectUrl}
-            title={file.name}
-            class="w-full h-full min-h-[60vh] border-0"
-          ></iframe>
+          {#if loadingInfo}
+            <div class="flex items-center justify-center h-24 bg-white/5">
+              <div class="h-6 w-32 rounded bg-white/10 animate-pulse"></div>
+            </div>
+          {:else}
+            <iframe
+              src={objectUrl}
+              title={file.name}
+              class="w-full h-full min-h-[60vh] border-0"
+            ></iframe>
+          {/if}
 
         <!-- Markdown preview -->
         {:else if category === 'markdown'}
           <div class="p-6">
             {#if loadingText}
-              <div class="flex items-center gap-2 text-slate-400 text-sm py-8 justify-center">
-                <span class="animate-spin">◌</span> Loading...
+              <div class="space-y-3">
+                {#each [1,2,3,4,5] as _}
+                  <div class="h-4 rounded bg-white/5 animate-pulse" style="max-width: {70 + Math.random() * 100}%"></div>
+                {/each}
               </div>
             {:else if textContent !== null}
               <MarkdownRenderer content={textContent} />
@@ -247,8 +274,10 @@
         {:else if category === 'code' || category === 'text'}
           <div class="p-4">
             {#if loadingText}
-              <div class="flex items-center gap-2 text-slate-400 text-sm py-8 justify-center">
-                <span class="animate-spin">◌</span> Loading...
+              <div class="space-y-2">
+                {#each [1,2,3,4] as _}
+                  <div class="h-3 rounded bg-white/5 animate-pulse" style="max-width: {80 + Math.random() * 20}%"></div>
+                {/each}
               </div>
             {:else if textContent !== null}
               <pre class="bg-black/40 rounded-lg p-4 overflow-x-auto border border-white/8 text-sm"><code class="text-slate-200 font-mono text-xs leading-relaxed">{textContent}</code></pre>
