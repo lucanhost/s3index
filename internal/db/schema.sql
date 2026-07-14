@@ -15,7 +15,11 @@ CREATE INDEX objects_is_dir_idx ON objects(is_dir);
 -- FTS5 virtual table for high-performance substring searching
 CREATE VIRTUAL TABLE objects_fts USING fts5(name, key UNINDEXED, tokenize='trigram');
 
--- Trigger to automatically populate the FTS table
+-- Triggers to keep FTS index in sync
 CREATE TRIGGER objects_ai AFTER INSERT ON objects BEGIN
     INSERT INTO objects_fts(name, key) VALUES (new.name, new.key);
+END;
+
+CREATE TRIGGER objects_ad AFTER DELETE ON objects BEGIN
+    DELETE FROM objects_fts WHERE key = old.key;
 END;

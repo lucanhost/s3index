@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"log"
 	"mime"
 	"path/filepath"
@@ -233,19 +234,179 @@ func (s *Store) startSyncWorker(ctx context.Context, interval time.Duration) {
 	}
 }
 
-// performSync executes the sync operation and swaps the database state
+// performSync executes the sync operation
 func (s *Store) performSync(ctx context.Context) {
-	newState, err := s.fetchAndCreateDB(ctx)
-	if err != nil {
-		log.Printf("S3 sync error: %v", err)
+	state := s.state.Load()
+
+	if state == nil || state.DB == nil {
+		newState, err := s.fetchAndCreateDB(ctx)
+		if err != nil {
+			log.Printf("S3 sync error: %v", err)
+			return
+		}
+		oldState := s.state.Swap(newState)
+		if oldState != nil && oldState.DB != nil {
+			oldState.DB.Close()
+		}
+		log.Println("S3 sync complete.")
 		return
 	}
 
-	oldState := s.state.Swap(newState)
-	if oldState != nil && oldState.DB != nil {
-		oldState.DB.Close()
+	if err := s.incrementalSync(ctx); err != nil {
+		log.Printf("S3 sync error: %v", err)
+		return
 	}
 	log.Println("S3 sync complete.")
+}
+
+// incrementalSync updates the existing database in-place using a temp table
+// to track all keys seen during the S3 scan, then removes stale entries.
+func (s *Store) incrementalSync(ctx context.Context) error {
+	syncCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+
+	state := s.state.Load()
+
+	tx, err := state.DB.BeginTx(syncCtx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	qtx := state.Queries.WithTx(tx)
+
+	_, err = tx.ExecContext(syncCtx, "DROP TABLE IF EXISTS _sync_seen")
+	if err != nil {
+		return fmt.Errorf("drop stale temp: %w", err)
+	}
+	_, err = tx.ExecContext(syncCtx, "CREATE TEMP TABLE _sync_seen(key TEXT PRIMARY KEY)")
+	if err != nil {
+		return fmt.Errorf("create temp table: %w", err)
+	}
+
+	objectCh := s.s3client.ListObjects(syncCtx, true)
+	folders := make(map[string]struct{})
+
+	for obj := range objectCh {
+		if obj.Err != nil {
+			return fmt.Errorf("s3 list: %w", obj.Err)
+		}
+
+		// Extract implicit folder paths from this key
+		current := 0
+		for {
+			idx := strings.IndexByte(obj.Key[current:], '/')
+			if idx == -1 {
+				break
+			}
+			folderEnd := current + idx + 1
+			folders[obj.Key[:folderEnd]] = struct{}{}
+			current = folderEnd
+		}
+
+		if strings.HasSuffix(obj.Key, "/") {
+			continue
+		}
+
+		contentType := obj.ContentType
+		if contentType == "" {
+			contentType = guessContentType(obj.Key)
+		}
+
+		// Check if object changed — skip upsert when etag matches
+		var currentEtag string
+		err := tx.QueryRowContext(syncCtx, "SELECT etag FROM objects WHERE key = ?", obj.Key).Scan(&currentEtag)
+		if err != nil && err != sql.ErrNoRows {
+			return fmt.Errorf("check etag %s: %w", obj.Key, err)
+		}
+
+		if err == sql.ErrNoRows || currentEtag != obj.ETag {
+			name, parent := splitKey(obj.Key)
+
+			err = qtx.UpsertObject(syncCtx, db.UpsertObjectParams{
+				Key:          obj.Key,
+				Name:         name,
+				Parent:       parent,
+				IsDir:        false,
+				Size:         obj.Size,
+				LastModified: obj.LastModified.Format(time.RFC3339),
+				ContentType:  contentType,
+				Etag:         obj.ETag,
+			})
+			if err != nil {
+				return fmt.Errorf("upsert %s: %w", obj.Key, err)
+			}
+		}
+
+		_, err = tx.ExecContext(syncCtx, "INSERT OR IGNORE INTO _sync_seen(key) VALUES (?)", obj.Key)
+		if err != nil {
+			return fmt.Errorf("track key %s: %w", obj.Key, err)
+		}
+	}
+
+	// Sync folder entries — skip existing folders to avoid FTS trigger churn
+	for folderPath := range folders {
+		var exists int
+		err := tx.QueryRowContext(syncCtx, "SELECT 1 FROM objects WHERE key = ? AND is_dir = 1", folderPath).Scan(&exists)
+		if err != nil && err != sql.ErrNoRows {
+			return fmt.Errorf("check folder %s: %w", folderPath, err)
+		}
+
+		if err == sql.ErrNoRows {
+			trimmed := folderPath[:len(folderPath)-1]
+			name, parent := splitKey(trimmed)
+
+			err = qtx.UpsertObject(syncCtx, db.UpsertObjectParams{
+				Key:          folderPath,
+				Name:         name,
+				Parent:       parent,
+				IsDir:        true,
+				Size:         0,
+				LastModified: "",
+				ContentType:  "",
+				Etag:         "",
+			})
+			if err != nil {
+				return fmt.Errorf("upsert folder %s: %w", folderPath, err)
+			}
+		}
+
+		_, err = tx.ExecContext(syncCtx, "INSERT OR IGNORE INTO _sync_seen(key) VALUES (?)", folderPath)
+		if err != nil {
+			return fmt.Errorf("track folder %s: %w", folderPath, err)
+		}
+	}
+
+	// Delete objects no longer in S3
+	result, err := tx.ExecContext(syncCtx, "DELETE FROM objects WHERE key NOT IN (SELECT key FROM _sync_seen)")
+	if err != nil {
+		return fmt.Errorf("delete stale: %w", err)
+	}
+	deleted, _ := result.RowsAffected()
+
+	_, err = tx.ExecContext(syncCtx, "DROP TABLE IF EXISTS _sync_seen")
+	if err != nil {
+		return fmt.Errorf("drop temp: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit: %w", err)
+	}
+
+	if deleted > 0 {
+		log.Printf("Sync: removed %d stale objects", deleted)
+	}
+
+	return nil
+}
+
+// splitKey extracts filename and parent prefix from an S3 key
+func splitKey(key string) (name, parent string) {
+	lastSlash := strings.LastIndexByte(key, '/')
+	if lastSlash == -1 {
+		return key, ""
+	}
+	return key[lastSlash+1:], key[:lastSlash+1]
 }
 
 func guessContentType(key string) string {

@@ -5,6 +5,13 @@ INSERT INTO objects (
     ?, ?, ?, ?, ?, ?, ?, ?
 );
 
+-- name: UpsertObject :exec
+INSERT OR REPLACE INTO objects (
+    key, name, parent, is_dir, size, last_modified, content_type, etag
+) VALUES (
+    ?, ?, ?, ?, ?, ?, ?, ?
+);
+
 -- name: ListObjectsByParent :many
 SELECT key, name, is_dir, size, last_modified
 FROM objects

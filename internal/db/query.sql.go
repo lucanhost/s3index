@@ -42,7 +42,26 @@ INSERT INTO objects (
 )
 `
 
+const upsertObject = `-- name: UpsertObject :exec
+INSERT OR REPLACE INTO objects (
+    key, name, parent, is_dir, size, last_modified, content_type, etag
+) VALUES (
+    ?, ?, ?, ?, ?, ?, ?, ?
+)
+`
+
 type InsertObjectParams struct {
+	Key          string
+	Name         string
+	Parent       string
+	IsDir        bool
+	Size         int64
+	LastModified string
+	ContentType  string
+	Etag         string
+}
+
+type UpsertObjectParams struct {
 	Key          string
 	Name         string
 	Parent       string
@@ -55,6 +74,20 @@ type InsertObjectParams struct {
 
 func (q *Queries) InsertObject(ctx context.Context, arg InsertObjectParams) error {
 	_, err := q.db.ExecContext(ctx, insertObject,
+		arg.Key,
+		arg.Name,
+		arg.Parent,
+		arg.IsDir,
+		arg.Size,
+		arg.LastModified,
+		arg.ContentType,
+		arg.Etag,
+	)
+	return err
+}
+
+func (q *Queries) UpsertObject(ctx context.Context, arg UpsertObjectParams) error {
+	_, err := q.db.ExecContext(ctx, upsertObject,
 		arg.Key,
 		arg.Name,
 		arg.Parent,
