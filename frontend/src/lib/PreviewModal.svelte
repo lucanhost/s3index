@@ -5,15 +5,20 @@
   import MarkdownRenderer from './MarkdownRenderer.svelte';
   import type { FileEntry, FileInfo } from './types';
 
+  const MAX_TEXT_SIZE = 1_048_576; // 1MB limit for text preview
+
   export let file: FileEntry | null = null;
   export let onClose: () => void;
 
   let info: FileInfo | null = null;
   let loadingInfo = false;
   let textContent: string | null = null;
+  let textTooLarge = false;
   let loadingText = false;
   let copied = false;
   let copiedDownload = false;
+  let panelEl: HTMLDivElement;
+  let prevFocus: HTMLElement | null = null;
 
   function copyToClipboard(text: string) {
     if (navigator.clipboard && window.isSecureContext) {
@@ -68,20 +73,26 @@
   } else {
     info = null;
     textContent = null;
+    textTooLarge = false;
   }
 
   async function loadInfo(f: FileEntry) {
     loadingInfo = true;
     info = null;
     textContent = null;
+    textTooLarge = false;
     try {
       info = await getFileInfo(f.path);
-      // For text/code/markdown, load content
       if (['markdown', 'code', 'text'].includes(getCategory(f.name, info.contentType))) {
         loadingText = true;
         try {
           const res = await fetch(getObjectUrl(f.path));
-          textContent = await res.text();
+          const len = res.headers.get('content-length');
+          if (len && parseInt(len) > MAX_TEXT_SIZE) {
+            textTooLarge = true;
+          } else {
+            textContent = await res.text();
+          }
         } finally {
           loadingText = false;
         }
@@ -93,6 +104,34 @@
 
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === 'Escape') onClose();
+    if (e.key === 'Tab') {
+      const focusable = panelEl?.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+      );
+      if (!focusable || focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+  }
+
+  $: if (file) {
+    prevFocus = document.activeElement as HTMLElement;
+  } else if (prevFocus) {
+    prevFocus.focus();
+    prevFocus = null;
+  }
+
+  function onCloseWithRestore() {
+    prevFocus?.focus();
+    prevFocus = null;
+    onClose();
   }
 
   onMount(() => window.addEventListener('keydown', handleKeydown));
@@ -103,8 +142,8 @@
   <!-- Backdrop -->
   <div
     class="fixed inset-0 z-40 bg-black/70 backdrop-blur-md flex items-center justify-center p-4"
-    onclick={onClose}
-    onkeydown={(e) => e.key === 'Escape' && onClose()}
+    onclick={onCloseWithRestore}
+    onkeydown={(e) => e.key === 'Escape' && onCloseWithRestore()}
     role="dialog"
     aria-modal="true"
     aria-label="File preview"
@@ -180,7 +219,7 @@
           <!-- Close -->
           <button
             class="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-all"
-            onclick={onClose}
+            onclick={onCloseWithRestore}
             aria-label="Close preview"
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
@@ -265,6 +304,10 @@
                   <div class="h-4 rounded bg-white/5 animate-pulse" style="max-width: {70 + Math.random() * 100}%"></div>
                 {/each}
               </div>
+            {:else if textTooLarge}
+              <div class="text-center py-8 text-slate-500 text-sm">
+                File too large to preview ({formatSize(info?.size || 0)})
+              </div>
             {:else if textContent !== null}
               <MarkdownRenderer content={textContent} />
             {/if}
@@ -278,6 +321,10 @@
                 {#each [1,2,3,4] as _}
                   <div class="h-3 rounded bg-white/5 animate-pulse" style="max-width: {80 + Math.random() * 20}%"></div>
                 {/each}
+              </div>
+            {:else if textTooLarge}
+              <div class="text-center py-8 text-slate-500 text-sm">
+                File too large to preview ({formatSize(info?.size || 0)})
               </div>
             {:else if textContent !== null}
               <pre class="bg-black/40 rounded-lg p-4 overflow-x-auto border border-white/8 text-sm"><code class="text-slate-200 font-mono text-xs leading-relaxed">{textContent}</code></pre>

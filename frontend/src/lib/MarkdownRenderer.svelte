@@ -1,5 +1,6 @@
 <script lang="ts">
   import { marked } from 'marked';
+  import DOMPurify from 'dompurify';
 
   export let content: string = '';
 
@@ -7,9 +8,9 @@
 
   $: {
     try {
-      rendered = marked.parse(content) as string;
+      rendered = DOMPurify.sanitize(marked.parse(content) as string);
     } catch {
-      rendered = `<p>${content}</p>`;
+      rendered = DOMPurify.sanitize(`<p>${content}</p>`);
     }
   }
 </script>

@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"io/fs"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -18,11 +18,16 @@ import (
 )
 
 func main() {
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	})))
+
 	cfg := config.LoadConfig()
 
 	s3Client, err := s3client.NewClient(cfg)
 	if err != nil {
-		log.Fatalf("Failed to initialize S3 client: %v", err)
+		slog.Error("Failed to initialize S3 client", "error", err)
+		os.Exit(1)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -36,17 +41,20 @@ func main() {
 	}
 
 	server := api.NewServer(cfg, s3Client, colStore, staticFS)
-	mux := server.SetupRouter()
 
 	httpServer := &http.Server{
-		Addr:    ":" + cfg.Port,
-		Handler: mux,
+		Addr:         ":" + cfg.Port,
+		Handler:      server.Handler(),
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  60 * time.Second,
 	}
 
 	go func() {
-		log.Printf("Server listening on port %s", cfg.Port)
+		slog.Info("Server listening", "port", cfg.Port)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Server failed to start: %v", err)
+			slog.Error("Server failed", "error", err)
+			os.Exit(1)
 		}
 	}()
 
@@ -54,17 +62,16 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	log.Println("Shutting down server...")
+	slog.Info("Shutting down server")
 
 	cancel()
-
 	colStore.Shutdown()
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownCancel()
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
-		log.Fatalf("Server forced to shutdown: %v", err)
+		slog.Error("Server forced to shutdown", "error", err)
 	}
 
-	log.Println("Server exiting")
+	slog.Info("Server exited")
 }

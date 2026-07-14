@@ -106,7 +106,35 @@ FROM objects
 WHERE parent = ?
 `
 
+const listObjectsByParentPaginated = `-- name: ListObjectsByParentPaginated :many
+SELECT key, name, is_dir, size, last_modified
+FROM objects
+WHERE parent = ? AND is_dir = 0
+ORDER BY key
+LIMIT ? OFFSET ?
+`
+
+const listFoldersByParent = `-- name: ListFoldersByParent :many
+SELECT key, name
+FROM objects
+WHERE parent = ? AND is_dir = 1
+ORDER BY key
+`
+
 type ListObjectsByParentRow struct {
+	Key          string
+	Name         string
+	IsDir        bool
+	Size         int64
+	LastModified string
+}
+
+type ListFoldersByParentRow struct {
+	Key  string
+	Name string
+}
+
+type ListObjectsByParentPaginatedRow struct {
 	Key          string
 	Name         string
 	IsDir        bool
@@ -123,6 +151,58 @@ func (q *Queries) ListObjectsByParent(ctx context.Context, parent string) ([]Lis
 	var items []ListObjectsByParentRow
 	for rows.Next() {
 		var i ListObjectsByParentRow
+		if err := rows.Scan(
+			&i.Key,
+			&i.Name,
+			&i.IsDir,
+			&i.Size,
+			&i.LastModified,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (q *Queries) ListFoldersByParent(ctx context.Context, parent string) ([]ListFoldersByParentRow, error) {
+	rows, err := q.db.QueryContext(ctx, listFoldersByParent, parent)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListFoldersByParentRow
+	for rows.Next() {
+		var i ListFoldersByParentRow
+		if err := rows.Scan(&i.Key, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (q *Queries) ListObjectsByParentPaginated(ctx context.Context, parent string, limit, offset int) ([]ListObjectsByParentPaginatedRow, error) {
+	rows, err := q.db.QueryContext(ctx, listObjectsByParentPaginated, parent, limit+1, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListObjectsByParentPaginatedRow
+	for rows.Next() {
+		var i ListObjectsByParentPaginatedRow
 		if err := rows.Scan(
 			&i.Key,
 			&i.Name,

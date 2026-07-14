@@ -9,11 +9,12 @@
 
   let query = '';
   let inputEl: HTMLInputElement;
-  // Display state
+  let panelEl: HTMLDivElement;
   let resultFiles: FileEntry[] = [];
   let resultFolders: FolderEntry[] = [];
   let searchState: 'idle' | 'searching' | 'done' = 'idle';
   let debounceTimer: ReturnType<typeof setTimeout>;
+  let prevFocus: HTMLElement | null = null;
 
   function close() {
     visible = false;
@@ -21,6 +22,8 @@
     resultFiles = [];
     resultFolders = [];
     searchState = 'idle';
+    prevFocus?.focus();
+    prevFocus = null;
   }
 
   async function doSearch(q: string) {
@@ -31,18 +34,16 @@
       return;
     }
     try {
-      // searchState already set to 'searching' in onInput
       const res = await searchFiles(q);
       resultFiles = res.files;
       resultFolders = res.folders;
     } finally {
-      searchState = 'done';  // Show results (or "No results")
+      searchState = 'done';
     }
   }
 
   function onInput() {
     clearTimeout(debounceTimer);
-    // Set searching state immediately to prevent "No results" flash
     if (query.length > 0) {
       searchState = 'searching';
     }
@@ -51,16 +52,44 @@
 
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === 'Escape') close();
+    if (e.key === 'Enter') {
+      const first = resultFolders[0] || resultFiles[0];
+      if (first) {
+        if ('isDir' in first || resultFolders[0] === first) {
+          onNavigate((first as FolderEntry).path);
+        } else {
+          onPreview(first as FileEntry);
+        }
+        close();
+      }
+    }
+    if (e.key === 'Tab') {
+      const focusable = panelEl?.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+      );
+      if (!focusable || focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
   }
 
-  $: if (visible && inputEl) setTimeout(() => inputEl?.focus(), 50);
+  $: if (visible) {
+    prevFocus = document.activeElement as HTMLElement;
+    setTimeout(() => inputEl?.focus(), 50);
+  }
 
   $: hasResults = resultFiles.length > 0 || resultFolders.length > 0;
   $: totalResults = resultFiles.length + resultFolders.length;
 </script>
 
 {#if visible}
-  <!-- Backdrop -->
   <div
     class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-start justify-center pt-16 px-4"
     onclick={close}
@@ -71,12 +100,12 @@
     tabindex="-1"
   >
     <div
+      bind:this={panelEl}
       class="w-full max-w-2xl glass rounded-2xl shadow-2xl border border-white/10 overflow-hidden"
       onclick={(e) => e.stopPropagation()}
       onkeydown={handleKeydown}
       role="presentation"
     >
-      <!-- Input -->
       <div class="flex items-center gap-3 px-4 py-3.5 border-b border-white/8">
         {#if searchState === 'searching'}
           <svg class="text-purple-400 flex-shrink-0 animate-spin" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -98,8 +127,7 @@
         <kbd class="px-2 py-0.5 text-xs text-slate-500 border border-slate-700 rounded font-mono">Esc</kbd>
       </div>
 
-      <!-- Results -->
-      <div class="max-h-[60vh] overflow-y-auto">
+      <div class="max-h-[60vh] overflow-y-auto" aria-live="polite" aria-atomic="true">
         {#if query.length === 0}
           <div class="flex flex-col items-center py-10 gap-2 text-slate-500">
             <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" class="opacity-30">
@@ -120,7 +148,6 @@
           <div class="px-2 py-2 space-y-1">
             <p class="text-xs text-slate-500 px-2 pb-0.5">{totalResults} result{totalResults !== 1 ? 's' : ''}</p>
 
-            <!-- Folders -->
             {#if resultFolders.length > 0}
               <p class="text-[11px] text-slate-600 uppercase tracking-widest font-semibold px-2 pt-1">Folders</p>
               {#each resultFolders as folder (folder.path)}
@@ -142,7 +169,6 @@
               {/each}
             {/if}
 
-            <!-- Files -->
             {#if resultFiles.length > 0}
               <p class="text-[11px] text-slate-600 uppercase tracking-widest font-semibold px-2 pt-2">Files</p>
               {#each resultFiles as file (file.path)}
@@ -159,7 +185,6 @@
                     >
                       {file.name}
                     </button>
-                    <!-- Click path to navigate to parent folder -->
                     <button
                       class="text-xs text-slate-500 hover:text-slate-300 text-left truncate w-full cursor-pointer transition-colors"
                       onclick={() => {
@@ -178,9 +203,8 @@
         {/if}
       </div>
 
-      <!-- Footer -->
       <div class="border-t border-white/5 px-4 py-2 flex items-center gap-4 text-xs text-slate-500">
-        <span><kbd class="font-mono">↵</kbd> preview file</span>
+        <span><kbd class="font-mono">↵</kbd> preview first result</span>
         <span>click path → open folder</span>
         <span><kbd class="font-mono">Esc</kbd> close</span>
       </div>

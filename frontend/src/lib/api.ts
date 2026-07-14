@@ -2,16 +2,18 @@ import type { DirectoryListing, FileInfo } from './types';
 
 const BASE = '/api';
 
-export async function listDirectory(prefix: string): Promise<DirectoryListing> {
-  const url = `${BASE}/list?prefix=${encodeURIComponent(prefix)}`;
-  const res = await fetch(url);
+export async function listDirectory(prefix: string, signal?: AbortSignal, offset?: number, limit?: number): Promise<DirectoryListing> {
+  let url = `${BASE}/list?prefix=${encodeURIComponent(prefix)}`;
+  if (offset !== undefined) url += `&offset=${offset}`;
+  if (limit !== undefined) url += `&limit=${limit}`;
+  const res = await fetch(url, { signal });
   if (!res.ok) throw new Error(`List failed: ${res.status}`);
   return res.json();
 }
 
-export async function getFileInfo(key: string): Promise<FileInfo> {
+export async function getFileInfo(key: string, signal?: AbortSignal): Promise<FileInfo> {
   const url = `${BASE}/info?key=${encodeURIComponent(key)}`;
-  const res = await fetch(url);
+  const res = await fetch(url, { signal });
   if (!res.ok) throw new Error(`Info failed: ${res.status}`);
   return res.json();
 }
@@ -20,11 +22,10 @@ export function getObjectUrl(key: string): string {
   return `${BASE}/object/${encodeURIComponent(key)}`;
 }
 
-export async function getReadme(prefix: string): Promise<string | null> {
-  // Check for README.md in the current prefix
+export async function getReadme(prefix: string, signal?: AbortSignal): Promise<string | null> {
   const readmeKey = prefix ? `${prefix.replace(/\/$/, '')}/README.md` : 'README.md';
   try {
-    const res = await fetch(getObjectUrl(readmeKey));
+    const res = await fetch(getObjectUrl(readmeKey), { signal });
     if (!res.ok) return null;
     const ct = res.headers.get('content-type') || '';
     if (!ct.includes('text') && !ct.includes('markdown') && !ct.includes('octet')) return null;
@@ -34,9 +35,9 @@ export async function getReadme(prefix: string): Promise<string | null> {
   }
 }
 
-export async function searchFiles(query: string): Promise<{ files: import('./types').FileEntry[], folders: import('./types').FolderEntry[] }> {
+export async function searchFiles(query: string, signal?: AbortSignal): Promise<{ files: import('./types').FileEntry[], folders: import('./types').FolderEntry[] }> {
   if (!query) return { files: [], folders: [] };
-  const res = await fetch(`${BASE}/search?q=${encodeURIComponent(query)}`);
+  const res = await fetch(`${BASE}/search?q=${encodeURIComponent(query)}`, { signal });
   if (!res.ok) return { files: [], folders: [] };
   return res.json();
 }
@@ -90,18 +91,19 @@ export function getCategory(name: string, contentType?: string): string {
   return 'file';
 }
 
+const CATEGORY_COLORS: Record<string, string> = {
+  image: 'text-green-400',
+  video: 'text-blue-400',
+  audio: 'text-orange-400',
+  pdf: 'text-red-400',
+  markdown: 'text-purple-400',
+  code: 'text-cyan-400',
+  text: 'text-slate-300',
+  archive: 'text-yellow-400',
+  file: 'text-slate-400',
+};
+
 /** Get a color class for a file category */
 export function getCategoryColor(category: string): string {
-  const map: Record<string, string> = {
-    image: 'text-green-400',
-    video: 'text-blue-400',
-    audio: 'text-orange-400',
-    pdf: 'text-red-400',
-    markdown: 'text-purple-400',
-    code: 'text-cyan-400',
-    text: 'text-slate-300',
-    archive: 'text-yellow-400',
-    file: 'text-slate-400',
-  };
-  return map[category] || 'text-slate-400';
+  return CATEGORY_COLORS[category] || 'text-slate-400';
 }

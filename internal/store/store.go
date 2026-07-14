@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log"
+	"log/slog"
 	"mime"
 	"path/filepath"
 	"strings"
@@ -38,13 +38,13 @@ func NewStore(ctx context.Context, client *s3client.Client, syncInterval time.Du
 		trigger:  make(chan struct{}, 1),
 	}
 
-	log.Println("Performing initial S3 object prefetch...")
+	slog.Info("Performing initial S3 object prefetch")
 	newState, err := s.fetchAndCreateDB(ctx)
 	if err != nil {
-		log.Printf("Warning: Initial S3 prefetch failed: %v. Starting with empty store.", err)
+		slog.Warn("Initial S3 prefetch failed, starting with empty store", "error", err)
 		newState, _ = createEmptyDB()
 	} else {
-		log.Println("Initial S3 prefetch complete.")
+		slog.Info("Initial S3 prefetch complete")
 	}
 
 	s.state.Store(newState)
@@ -215,7 +215,7 @@ func (s *Store) fetchAndCreateDB(ctx context.Context) (*DBState, error) {
 func (s *Store) startSyncWorker(ctx context.Context, interval time.Duration) {
 	defer s.wg.Done()
 
-	log.Printf("Starting background S3 sync worker with interval: %s", interval)
+	slog.Info("Starting background S3 sync worker", "interval", interval)
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -223,12 +223,12 @@ func (s *Store) startSyncWorker(ctx context.Context, interval time.Duration) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("Stopping S3 sync worker.")
+			slog.Info("Stopping S3 sync worker")
 			return
 		case <-ticker.C:
 			s.performSync(ctx)
 		case <-s.trigger:
-			log.Println("Immediate sync triggered...")
+			slog.Info("Immediate sync triggered")
 			s.performSync(ctx)
 		}
 	}
@@ -241,22 +241,22 @@ func (s *Store) performSync(ctx context.Context) {
 	if state == nil || state.DB == nil {
 		newState, err := s.fetchAndCreateDB(ctx)
 		if err != nil {
-			log.Printf("S3 sync error: %v", err)
+			slog.Error("Full sync failed", "error", err)
 			return
 		}
 		oldState := s.state.Swap(newState)
 		if oldState != nil && oldState.DB != nil {
 			oldState.DB.Close()
 		}
-		log.Println("S3 sync complete.")
+		slog.Info("Full sync complete")
 		return
 	}
 
 	if err := s.incrementalSync(ctx); err != nil {
-		log.Printf("S3 sync error: %v", err)
+		slog.Error("Incremental sync failed", "error", err)
 		return
 	}
-	log.Println("S3 sync complete.")
+	slog.Info("Incremental sync complete")
 }
 
 // incrementalSync updates the existing database in-place using a temp table
@@ -283,6 +283,18 @@ func (s *Store) incrementalSync(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("create temp table: %w", err)
 	}
+
+	etagStmt, err := tx.PrepareContext(syncCtx, "SELECT etag FROM objects WHERE key = ?")
+	if err != nil {
+		return fmt.Errorf("prepare etag stmt: %w", err)
+	}
+	defer etagStmt.Close()
+
+	trackStmt, err := tx.PrepareContext(syncCtx, "INSERT OR IGNORE INTO _sync_seen(key) VALUES (?)")
+	if err != nil {
+		return fmt.Errorf("prepare track stmt: %w", err)
+	}
+	defer trackStmt.Close()
 
 	objectCh := s.s3client.ListObjects(syncCtx, true)
 	folders := make(map[string]struct{})
@@ -315,7 +327,7 @@ func (s *Store) incrementalSync(ctx context.Context) error {
 
 		// Check if object changed — skip upsert when etag matches
 		var currentEtag string
-		err := tx.QueryRowContext(syncCtx, "SELECT etag FROM objects WHERE key = ?", obj.Key).Scan(&currentEtag)
+		err := etagStmt.QueryRowContext(syncCtx, obj.Key).Scan(&currentEtag)
 		if err != nil && err != sql.ErrNoRows {
 			return fmt.Errorf("check etag %s: %w", obj.Key, err)
 		}
@@ -338,16 +350,23 @@ func (s *Store) incrementalSync(ctx context.Context) error {
 			}
 		}
 
-		_, err = tx.ExecContext(syncCtx, "INSERT OR IGNORE INTO _sync_seen(key) VALUES (?)", obj.Key)
+		_, err = trackStmt.ExecContext(syncCtx, obj.Key)
 		if err != nil {
 			return fmt.Errorf("track key %s: %w", obj.Key, err)
 		}
 	}
 
+	// Prepare folder existence check
+	folderStmt, err := tx.PrepareContext(syncCtx, "SELECT 1 FROM objects WHERE key = ? AND is_dir = 1")
+	if err != nil {
+		return fmt.Errorf("prepare folder stmt: %w", err)
+	}
+	defer folderStmt.Close()
+
 	// Sync folder entries — skip existing folders to avoid FTS trigger churn
 	for folderPath := range folders {
 		var exists int
-		err := tx.QueryRowContext(syncCtx, "SELECT 1 FROM objects WHERE key = ? AND is_dir = 1", folderPath).Scan(&exists)
+		err := folderStmt.QueryRowContext(syncCtx, folderPath).Scan(&exists)
 		if err != nil && err != sql.ErrNoRows {
 			return fmt.Errorf("check folder %s: %w", folderPath, err)
 		}
@@ -371,7 +390,7 @@ func (s *Store) incrementalSync(ctx context.Context) error {
 			}
 		}
 
-		_, err = tx.ExecContext(syncCtx, "INSERT OR IGNORE INTO _sync_seen(key) VALUES (?)", folderPath)
+		_, err = trackStmt.ExecContext(syncCtx, folderPath)
 		if err != nil {
 			return fmt.Errorf("track folder %s: %w", folderPath, err)
 		}
@@ -394,7 +413,7 @@ func (s *Store) incrementalSync(ctx context.Context) error {
 	}
 
 	if deleted > 0 {
-		log.Printf("Sync: removed %d stale objects", deleted)
+		slog.Info("Removed stale objects", "count", deleted)
 	}
 
 	return nil

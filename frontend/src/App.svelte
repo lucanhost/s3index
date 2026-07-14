@@ -15,6 +15,9 @@
 
   let folders = $state<FolderEntry[]>([]);
   let files = $state<FileEntry[]>([]);
+  let hasMore = $state(false);
+  let currentOffset = $state(0);
+  let loadingMore = $state(false);
   let readmeContent = $state<string | null>(null);
   let loadingReadme = $state(false);
 
@@ -23,6 +26,8 @@
 
   let searchVisible = $state(false);
   let previewFile = $state<FileEntry | null>(null);
+
+  let currentController: AbortController | null = null;
 
 
   // ── URL helpers ─────────────────────────────────────────────────────────────
@@ -46,17 +51,25 @@
   }
 
   async function loadDirectory(newPrefix: string, openPreviewKey: string | undefined = undefined) {
+    currentController?.abort();
+    const controller = new AbortController();
+    currentController = controller;
+
     prefix = newPrefix;
     loading = true;
     error = null;
     readmeContent = null;
     files = [];
     folders = [];
+    hasMore = false;
+    currentOffset = 0;
 
     try {
-      const data = await listDirectory(newPrefix);
+      const data = await listDirectory(newPrefix, controller.signal);
       folders = data.folders;
       files = data.files;
+      hasMore = data.has_more;
+      currentOffset = files.length;
 
       // Auto-open preview if a key was requested (e.g. from a shared link)
       if (openPreviewKey) {
@@ -67,24 +80,39 @@
       // Check for README.md - load asynchronously without blocking file list
       const hasReadme = data.files.some(f => f.name.toLowerCase() === 'readme.md');
       if (hasReadme) {
-        // Fire and forget - README loads independently
-        loadReadmeAsync(newPrefix);
+        loadReadmeAsync(newPrefix, controller.signal);
       }
     } catch (e: any) {
+      if (e instanceof DOMException && e.name === 'AbortError') return;
       error = e.message || 'Failed to load directory';
     } finally {
       loading = false;
     }
   }
 
-  async function loadReadmeAsync(prefix: string) {
+  async function loadReadmeAsync(prefix: string, signal: AbortSignal | undefined) {
     loadingReadme = true;
     try {
-      readmeContent = await getReadme(prefix);
+      readmeContent = await getReadme(prefix, signal);
     } catch {
       // Silently fail - README is optional
     } finally {
       loadingReadme = false;
+    }
+  }
+
+  async function loadMore() {
+    if (loadingMore || !hasMore) return;
+    loadingMore = true;
+    try {
+      const data = await listDirectory(prefix, undefined, currentOffset);
+      files = [...files, ...data.files];
+      hasMore = data.has_more;
+      currentOffset = files.length;
+    } catch {
+      // silently fail - user can retry
+    } finally {
+      loadingMore = false;
     }
   }
 
@@ -126,17 +154,22 @@
     }
   }
 
+  function handlePopState() {
+    const { prefix: p, previewKey: pk } = parseCurrentUrl();
+    previewFile = null;
+    loadDirectory(p, pk);
+  }
+
   onMount(() => {
     const { prefix: initPrefix, previewKey } = parseCurrentUrl();
     loadDirectory(initPrefix, previewKey);
 
     window.addEventListener('keydown', handleGlobalKeydown);
-    window.addEventListener('popstate', () => {
-      const { prefix: p, previewKey: pk } = parseCurrentUrl();
-      previewFile = null;
-      loadDirectory(p, pk);
-    });
-    return () => window.removeEventListener('keydown', handleGlobalKeydown);
+    window.addEventListener('popstate', handlePopState);
+    return () => {
+      window.removeEventListener('keydown', handleGlobalKeydown);
+      window.removeEventListener('popstate', handlePopState);
+    };
   });
 
   // Computed stats
@@ -224,7 +257,7 @@
         </div>
       {:else}
         <!-- Stats bar -->
-        <div class="flex items-center gap-3 mb-4 flex-wrap text-xs text-slate-500">
+        <div class="flex items-center gap-3 mb-4 flex-wrap text-xs text-slate-500" role="status" aria-live="polite">
           <span>{folderCount} folder{folderCount !== 1 ? 's' : ''}</span>
           <span class="text-slate-700">•</span>
           <span>{fileCount} file{fileCount !== 1 ? 's' : ''}</span>
@@ -238,27 +271,33 @@
       <!-- File browser card -->
       <div class="glass rounded-xl border border-white/8 overflow-hidden">
         <!-- Sort header -->
-        <div class="flex items-center px-4 py-2 border-b border-white/8 text-xs text-slate-500 bg-white/[0.02]">
+        <div class="flex items-center px-4 py-2 border-b border-white/8 text-xs text-slate-500 bg-white/[0.02]" role="row">
           <div class="w-5 mr-3 flex-shrink-0"></div>
+          <!-- svelte-ignore a11y_role_supports_aria_props_implicit -->
           <button
             class="flex-1 flex items-center gap-1 hover:text-slate-300 transition-colors cursor-pointer text-left font-medium"
             onclick={() => toggleSort('name')}
+            aria-sort={sortKey === 'name' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
           >
             Name
             {#if sortKey === 'name'}
               <span class="text-purple-400">{sortDir === 'asc' ? '↑' : '↓'}</span>
             {/if}
           </button>
+          <!-- svelte-ignore a11y_role_supports_aria_props_implicit -->
           <button
             class="w-24 text-right hover:text-slate-300 transition-colors cursor-pointer hidden sm:block font-medium"
             onclick={() => toggleSort('lastModified')}
+            aria-sort={sortKey === 'lastModified' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
           >
             Modified
             {#if sortKey === 'lastModified'}<span class="text-purple-400 ml-1">{sortDir === 'asc' ? '↑' : '↓'}</span>{/if}
           </button>
+          <!-- svelte-ignore a11y_role_supports_aria_props_implicit -->
           <button
             class="w-20 text-right hover:text-slate-300 transition-colors cursor-pointer ml-6 font-medium"
             onclick={() => toggleSort('size')}
+            aria-sort={sortKey === 'size' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
           >
             Size
             {#if sortKey === 'size'}<span class="text-purple-400 ml-1">{sortDir === 'asc' ? '↑' : '↓'}</span>{/if}
@@ -288,6 +327,17 @@
             {sortKey}
             {sortDir}
           />
+          {#if hasMore}
+            <div class="flex justify-center py-4">
+              <button
+                class="px-5 py-2 rounded-lg bg-white/5 text-slate-300 hover:bg-white/10 border border-white/8 transition-all text-sm"
+                onclick={loadMore}
+                disabled={loadingMore}
+              >
+                {loadingMore ? 'Loading...' : 'Load more'}
+              </button>
+            </div>
+          {/if}
         {/if}
       </div>
 

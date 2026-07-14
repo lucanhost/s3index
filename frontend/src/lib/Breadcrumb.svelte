@@ -37,7 +37,7 @@
 
     {#if i === crumbs.length - 1}
       <!-- Current directory (not clickable) -->
-      <span class="px-2 py-1 text-purple-300 font-semibold truncate max-w-[200px]">{crumb.name}</span>
+      <span class="px-2 py-1 text-purple-300 font-semibold truncate max-w-[200px]" aria-current="page">{crumb.name}</span>
     {:else}
       <button
         class="px-2 py-1 rounded-md text-slate-300 hover:text-purple-300 hover:bg-white/5 transition-all duration-150 truncate max-w-[160px] cursor-pointer"

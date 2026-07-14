@@ -24,6 +24,5 @@ export interface FileInfo {
   eTag: string;
 }
 
-export type ViewMode = 'list' | 'grid';
-export type SortKey = 'name' | 'size' | 'lastModified' | 'type';
+export type SortKey = 'name' | 'size' | 'lastModified';
 export type SortDir = 'asc' | 'desc';

@@ -15,6 +15,8 @@ type FileEntry struct {
 type DirectoryListing struct {
 	Folders []FolderEntry `json:"folders"`
 	Files   []FileEntry   `json:"files"`
+	HasMore bool          `json:"has_more"`
+	Offset  int           `json:"offset"`
 }
 
 type FileInfo struct {
